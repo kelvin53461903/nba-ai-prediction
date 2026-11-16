@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from PIL import Image
+from cloud_accuracy import save, probabilities, accuracy
 
-def render(games, model, now, name, stamp, features, ET, HK):
+def render(games, model, now, name, stamp, features, ET, HK, config, cloud_rows, simulate, final):
     st.subheader('Pinnacle賠率統計比較')
     st.caption('Pinnacle 資料以人工核對匯入，僅供統計研究；未連接即時 API。')
     upload=st.file_uploader('匯入 Pinnacle截圖',type=['png','jpg','jpeg'],key='pinnacle_image')
@@ -32,12 +33,21 @@ def render(games, model, now, name, stamp, features, ET, HK):
             raw=1/hm+1/am; market=(1/hm)/raw
             row={'資料來源':'Pinnacle','賽事ID':selected,'主隊':name(h),'客隊':name(a),'開賽時間':stamp(g).tz_convert(HK).isoformat(),'匯入時間':datetime.now(HK).isoformat(),'主隊賠率':hm,'客隊賠率':am,'市場主勝率':market,'市場客勝率':1-market,'原始隱含率合計':raw,'主隊讓分':sp,'大小分界線':total}
             ts=stamp(g); p=hp=ap=None
-            if model and ts>pd.Timestamp(now) and not g.get('postponed') and (ts.tz_convert(ET).date()-model[6]).days<=14:
+            if model and ts>pd.Timestamp(datetime.now(HK)) and not final(g) and not g.get('postponed') and 0<=(ts.tz_convert(ET).date()-model[6]).days<=14:
                 c,reg,hist,*_=model
                 x=features(hist,h['id'],a['id'],ts.tz_convert(ET).date())
                 if x is not None: p=float(c.predict_proba([x])[0,1]); hp,ap=map(float,reg.predict([x])[0])
             row.update({'AI主勝率':p,'AI客勝率':None if p is None else 1-p,'AI預測主客分差':None if hp is None else hp-ap,'AI預測總分':None if hp is None else hp+ap})
-            st.session_state.pinnacle_rows.append(row)
+            if config:
+                if p is None or final(g) or pd.Timestamp(row['匯入時間'])>=ts or datetime.now(HK)>=ts:
+                    st.warning('只保存有效賽前模型快照至雲端。')
+                else:
+                    record=dict(game_id=int(selected),tip=ts.isoformat(),captured=row['匯入時間'],home=name(h),away=name(a),home_odds=hm,away_odds=am,home_spread=sp,total_line=total,ai_home_win=p,**probabilities(simulate(hp,ap,model[11],int(selected)),sp,total))
+                    try:
+                        save(config,record)
+                        st.rerun()
+                    except Exception as e: st.error(str(e))
+            else: st.session_state.pinnacle_rows.append(row)
     backup=st.file_uploader('還原先前匯出的 Pinnacle 賠率 CSV（目前工作階段）',type=['csv'],key='pinnacle_backup')
     if backup is not None and st.button('還原 CSV',key='restore_odds'):
         try:
@@ -58,4 +68,15 @@ def render(games, model, now, name, stamp, features, ET, HK):
             if pd.notna(r['AI預測總分']): st.write(f"AI 主客分差：{r['AI預測主客分差']:+.1f}；AI 預測總分：{r['AI預測總分']:.1f}")
         st.dataframe(data,hide_index=True)
         st.download_button('匯出賠率比較 CSV',data.to_csv(index=False).encode('utf-8-sig'),'pinnacle_odds.csv','text/csv')
-    st.caption('賠率是手動核對的截圖快照，非即時資料；比較紀錄只保留於目前工作階段，請匯出。原有預測雲端紀錄不受影響。')
+    if config:
+        st.subheader('雲端歷史快照及命中率')
+        st.caption('每場採用最早已結算賽前快照；走盤與預測平手不計命中率。網站執行時更新完場結果。')
+        st.dataframe(pd.DataFrame(accuracy(cloud_rows,now)),hide_index=True,column_config={'命中率':st.column_config.NumberColumn(format='percent')})
+        if cloud_rows:
+            frame=pd.DataFrame(cloud_rows)
+            st.download_button('匯出雲端快照 CSV',frame.to_csv(index=False).encode('utf-8-sig'),'pinnacle_cloud.csv','text/csv')
+            for col in ('tip','captured'): frame[col]=pd.to_datetime(frame[col],utc=True).dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT')
+            st.dataframe(frame,hide_index=True)
+            st.caption('舊 CSV 還原僅供目前工作階段查看，不會補造歷史雲端預測。')
+        else: st.info('尚無雲端快照，或讀取失敗。')
+    st.caption('手動核對截圖快照，非即時資料；模型比例未經歷史盤口校準。')

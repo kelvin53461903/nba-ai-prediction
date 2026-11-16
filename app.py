@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.2 LITE SPREAD', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.4 CLOUD ACCURACY PRO', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -253,7 +253,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.2 LITE SPREAD')
+st.title('🏀 NBA AI Prediction Platform V7.4 CLOUD ACCURACY PRO')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -308,6 +308,11 @@ def dashboard():
         with st.spinner('自動取得歷史賽事並訓練模型；首次使用可能需數分鐘…'):
             rows,history_time=history(key,season); model=train(rows)
     except Exception as e: error=str(e)
+    from cloud_accuracy import load, settle, probabilities
+    cloud_odds=[]
+    if cloud_config():
+        try: cloud_odds=settle(cloud_config(),load(cloud_config()),(rows if model else [])+games,final)
+        except Exception as e: st.warning(str(e))
     with tabs[0]:
         if error: st.warning('模型暫不可用：'+error)
         if model: st.caption(f'歷史資料截至 {model[6]}（美東賽事日期）；讀取時間 {history_time}；預測只使用賽前資料')
@@ -349,7 +354,7 @@ def dashboard():
                             st.caption('以歷史測試比分殘差成對抽樣；非保證覆蓋率，模擬勝率獨立於分類模型。')
                         st.markdown('**AI 讓分勝率**')
                         saved=[]
-                        for row in st.session_state.get('pinnacle_rows',[]):
+                        for row in ([{'匯入時間':r['captured'],'主隊讓分':r['home_spread'],'賽事ID':r['game_id']} for r in cloud_odds]+st.session_state.get('pinnacle_rows',[])):
                             try:
                                 captured=pd.to_datetime(row['匯入時間'],utc=True)
                                 line=float(row['主隊讓分'])
@@ -365,7 +370,7 @@ def dashboard():
                             cc[1].metric(f'{name(a)} ({-line:+g})',f'{np.mean(adjusted<0):.1%}')
                             st.caption(f'Pinnacle 截圖快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
                         else:
-                            st.caption('暫無讓分資料：請於 Pinnacle 賠率查詢與比較核對並保存本場資料，再切換日期後切回（不要重新載入瀏覽器）。')
+                            st.caption('暫無讓分資料：請於 Pinnacle 賠率查詢與比較核對並保存本場資料，再切換日期後切回（雲端模式可重新載入）。')
                         with st.expander('近期戰績、主客場及休息分析',expanded=True):
                             details=[]
                             for t,loc in [(a,0),(h,1)]:
@@ -443,7 +448,7 @@ def dashboard():
         st.caption('雲端模式：排程需另啟用。匯入請使用自己先前匯出的原始 CSV。' if cloud_config() else '尚未設定雲端，請先備份 CSV。')
         # Import is deliberately disabled on public UI; use owner-only migration workflow.
         try:
-            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log.rename(columns={'id':'賽事編號','tip':'開賽時間','captured':'預測時間','home':'主隊','away':'客隊','probability':'主隊勝率','hp':'主隊預測分','ap':'客隊預測分','actual':'主隊實際勝出'}),hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('雲端資料庫已設定' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
+            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log.assign(tip=pd.to_datetime(log.tip,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT'),captured=pd.to_datetime(log.captured,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT')).rename(columns={'id':'賽事編號','tip':'開賽時間','captured':'預測時間','home':'主隊','away':'客隊','probability':'主隊勝率','hp':'主隊預測分','ap':'客隊預測分','actual':'主隊實際勝出'}),hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('雲端資料庫已設定' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
             for col,n in zip(cc,[7,30,None]):
                 subset=done if n is None else done[dates>=pd.Timestamp(now)-pd.Timedelta(days=n)]
                 col.metric(('全部' if n is None else f'近 {n} 天')+'命中率',f'{((subset.probability>=.5)==subset.actual.astype(bool)).mean():.1%}' if len(subset) else '尚無',f'{len(subset)} 場',delta_color='off')
@@ -451,6 +456,6 @@ def dashboard():
 
     with tabs[6]:
         from pinnacle_odds import render
-        render(games, model, now, name, stamp, features, ET, HK)
+        render(games, model, now, name, stamp, features, ET, HK, cloud_config(), cloud_odds, simulate, final)
 
 dashboard()
