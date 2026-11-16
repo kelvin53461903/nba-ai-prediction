@@ -1,5 +1,5 @@
-streamlit>=1.36
-pandas>=2.1
-numpy>=1.26
-scikit-learn>=1.4
-requests>=2.31
+streamlit>=1.42,<2
+pandas>=2.2,<4
+numpy>=1.26,<3
+requests>=2.31,<3
+scikit-learn>=1.5,<2
