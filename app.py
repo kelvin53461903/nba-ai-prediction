@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.4 CLOUD ACCURACY PRO', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.5 SPEED & CLOUD FIX', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -37,13 +37,16 @@ def show_team_logo(column, team):
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch(key, endpoint, pairs):
     rows=[]; cursor=None; seen=set()
+    deadline=time.monotonic()+ (900 if os.environ.get('NBA_WORKER') else 90)
     for _ in range(250):
+        if time.monotonic()>=deadline: raise ValueError('API 讀取逾時；請稍後重試。')
         params=list(pairs)+[('per_page',100)]
         if cursor is not None: params.append(('cursor',cursor))
         for attempt in range(4):
             r=requests.get(BASE+endpoint,params=params,headers={'Authorization':key},timeout=30)
             if r.status_code!=429: break
-            if attempt<3: time.sleep(65)
+            if attempt<3 and os.environ.get('NBA_WORKER'): time.sleep(65)
+            else: break
         if r.status_code in (401,403): raise ValueError('API Key 無效或方案未授權此功能。')
         if r.status_code==429: raise ValueError('API 次數限制，請稍後再試。')
         if not r.ok: raise ValueError(f'API 錯誤 HTTP {r.status_code}')
@@ -90,14 +93,13 @@ def cloud_config():
     try:
         url=os.environ.get('SUPABASE_URL') or st.secrets['SUPABASE_URL']
         key=os.environ.get('SUPABASE_SERVICE_KEY') or st.secrets['SUPABASE_SERVICE_KEY']
-        return str(url).rstrip('/'),str(key)
+        return str(url).strip().rstrip('/'),str(key).strip()
     except Exception: return None
 
 def cloud_request(method, **kwargs):
     url,key=cloud_config()
     headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'resolution=ignore-duplicates,return=minimal'}
-    if key.startswith('sb_secret_'):
-             headers.pop('Authorization', None)
+    if key.startswith('sb_secret_'): headers.pop('Authorization',None)
     r=requests.request(method,url+'/rest/v1/nba_predictions',headers=headers,timeout=20,**kwargs)
     if not r.ok: raise ValueError('雲端紀錄操作失敗 HTTP '+str(r.status_code))
     return r
@@ -118,6 +120,7 @@ def ledger_results(rows):
         for offset in range(0,100000,500):
             page=cloud_request('GET',params={'select':'*','order':'id.asc','limit':500,'offset':offset}).json(); records.extend(page)
             if len(page)<500: break
+        else: raise ValueError('雲端紀錄超過讀取上限')
         pending={r['id'] for r in records if r.get('actual') is None}
         for g in rows:
             if g.get('id') in pending and final(g) and g.get('home_team_score') and g.get('visitor_team_score'):
@@ -255,7 +258,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.4 CLOUD ACCURACY PRO')
+st.title('🏀 NBA AI Prediction Platform V7.5 SPEED & CLOUD FIX')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -274,20 +277,35 @@ with st.sidebar:
     auto=st.checkbox('每 10 分鐘更新畫面',True)
     if st.button('立即重新讀取賽程'): fetch.clear(); official_report.clear()
     st.markdown('[API 申請](https://app.balldontlie.io/)')
-if not key: st.info('請輸入 API Key，毋須上傳 CSV。'); st.stop()
+
+
+def render_ledger(now):
+    st.caption('雲端模式：排程需另啟用。匯入請使用自己先前匯出的原始 CSV。' if cloud_config() else '尚未設定雲端，請先備份 CSV。')
+    # Import is deliberately disabled on public UI; use owner-only migration workflow.
+    try:
+        log=ledger_results([]); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log.assign(tip=pd.to_datetime(log.tip,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT'),captured=pd.to_datetime(log.captured,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT')).rename(columns={'id':'賽事編號','tip':'開賽時間','captured':'預測時間','home':'主隊','away':'客隊','probability':'主隊勝率','hp':'主隊預測分','ap':'客隊預測分','actual':'主隊實際勝出'}),hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('已讀取 '+str(len(log))+' 筆紀錄'); st.caption('雲端資料庫讀取成功' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
+        for col,n in zip(cc,[7,30,None]):
+            subset=done if n is None else done[dates>=pd.Timestamp(now)-pd.Timedelta(days=n)]
+            col.metric(('全部' if n is None else f'近 {n} 天')+'命中率',f'{((subset.probability>=.5)==subset.actual.astype(bool)).mean():.1%}' if len(subset) else '尚無',f'{len(subset)} 場',delta_color='off')
+    except Exception as e: st.warning(str(e))
+
 
 @st.fragment(run_every=600 if auto else None)
 def dashboard():
     now=datetime.now(HK); today=now.date(); season=today.year if today.month>=9 else today.year-1
+    labels=['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','Pinnacle 賠率查詢與比較']
+    page=st.radio('功能選擇',labels,index=5,horizontal=True,label_visibility='collapsed')
+    if page==labels[5]:
+        render_ledger(now); return
+    if not key: st.info('請設定 BALLDONTLIE API Key。'); return
     day=st.date_input('比賽日期（香港時間）',today)
     try:
         games,updated=fetch(key,'games',tuple(('dates[]',d.isoformat()) for d in [day-timedelta(days=1),day,day+timedelta(days=1)]))
         games=sorted([g for g in games if not pd.isna(stamp(g)) and stamp(g).tz_convert(HK).date()==day],key=stamp)
     except Exception as e: st.error(f'賽程讀取失敗：{e}'); return
     st.caption('賽程讀取時間：'+updated)
-    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','Pinnacle 賠率查詢與比較'])
     injuries=[]; injury_ok=False; injury_error=''; injury_time=None; injury_url=''; read_time=None
-    if games:
+    if games and page in (labels[0],labels[1]):
         try: injuries,injury_time,injury_url,read_time=official_report(season); injury_ok=True
         except Exception as e: injury_error=str(e)
     def related(g,t):
@@ -305,17 +323,19 @@ def dashboard():
         if not rr or any('SUBMITTED' in r['status'] for r in rr): return '未提交或未能配對'
         ss=[r['status'] for r in rr if not r['reason'].lower().startswith('g league')]
         return f'Out {ss.count("Out")} / Doubtful {ss.count("Doubtful")} / Questionable {ss.count("Questionable")}（非健康確認）'
-    model=None; history_time=''; error=''
-    try:
-        with st.spinner('自動取得歷史賽事並訓練模型；首次使用可能需數分鐘…'):
-            rows,history_time=history(key,season); model=train(rows)
-    except Exception as e: error=str(e)
+    model=None; rows=[]; history_time=''; error=''
+    if page in (labels[0],labels[3],labels[4],labels[6]):
+        try:
+            with st.spinner('讀取歷史資料及快取模型…'):
+                rows,history_time=history(key,season); model=train(rows)
+        except Exception as e: error=str(e)
+        if error and page!=labels[0]: st.warning('模型暫不可用：'+error)
     from cloud_accuracy import load, settle, probabilities
     cloud_odds=[]
-    if cloud_config():
+    if page==labels[6] and cloud_config():
         try: cloud_odds=settle(cloud_config(),load(cloud_config()),(rows if model else [])+games,final)
         except Exception as e: st.warning(str(e))
-    with tabs[0]:
+    if page==labels[0]:
         if error: st.warning('模型暫不可用：'+error)
         if model: st.caption(f'歷史資料截至 {model[6]}（美東賽事日期）；讀取時間 {history_time}；預測只使用賽前資料')
         if not games: st.info('該日期沒有已取得的賽事。')
@@ -400,7 +420,7 @@ def dashboard():
                             st.caption('假設每單位缺陣風險改變 1.5 個百分點，上限 7.5；非回測校準，不改正式預測或比分。')
                         else: st.info('傷兵報告未完整或過期，不計算調整情境。')
                 st.caption(f'客隊傷兵：{risk(g,a)}｜主隊傷兵：{risk(g,h)}（原始模型未納入傷兵）')
-    with tabs[1]:
+    if page==labels[1]:
         st.markdown(f'[NBA 官方傷兵報告](https://official.nba.com/nba-injury-report-{season}-{str(season+1)[-2:]}-season/)')
         if not injury_ok: st.warning('傷兵資料未能查核：'+(injury_error or '沒有當日賽程'))
         else:
@@ -415,7 +435,7 @@ def dashboard():
                     for r in rr: display.append({'球隊':r['team'],'球員':r['player'],'狀態':r['status'],'原因':r['reason']})
             st.dataframe(display,width='stretch',hide_index=True)
             st.caption('只顯示所選賽事配對結果；未列出不代表健康。傷兵風險獨立顯示，未經歷史傷兵資料驗證，不調整模型勝率。')
-    with tabs[2]:
+    if page==labels[2]:
         q=st.text_input('球員英文名稱')
         if q.strip():
             try:
@@ -424,7 +444,7 @@ def dashboard():
                     players,_=fetch(key,'players',(('search',q.strip().split()[-1]),)); players=[p for p in players if q.strip().casefold() in (p.get('first_name','')+' '+p.get('last_name','')).casefold()]
                 st.dataframe([{'球員':p.get('first_name','')+' '+p.get('last_name',''),'球隊':name(p.get('team') or {}),'位置':p.get('position')} for p in players],width='stretch')
             except Exception as e: st.warning(str(e))
-    with tabs[3]:
+    if page==labels[3]:
         if model:
             st.write(f'有效樣本：{model[5]}｜測試起始日期：{model[9]}｜採用 {model[7]} / {model[8]}')
             st.dataframe(model[3],width='stretch'); st.dataframe(model[4],width='stretch')
@@ -440,23 +460,13 @@ def dashboard():
             st.download_button('下載歷史回測結果',audit.to_csv(index=False).encode('utf-8-sig'),'backtest.csv','text/csv')
             st.caption('前約65%訓練、15%選模、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
         st.caption('模型使用近期 5、10 場得失分、勝率、主客場戰績、休息日、近20場時間加權表現、分差波動及近7日賽程密度。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
-    with tabs[4]:
+    if page==labels[4]:
         if model:
             teams={t['id']:name(t) for g in rows for t in (g['home_team'],g['visitor_team'])}
             ranking=[{'球隊':teams.get(t,str(t)),'Elo':round(elo_rating(rec))} for t,rec in model[2].items() if rec]
             st.dataframe(pd.DataFrame(ranking).sort_values('Elo',ascending=False),hide_index=True,width='stretch')
             st.caption('Elo 初始1500、K=20、主場優勢65；設定未獨立調優。')
-    with tabs[5]:
-        st.caption('雲端模式：排程需另啟用。匯入請使用自己先前匯出的原始 CSV。' if cloud_config() else '尚未設定雲端，請先備份 CSV。')
-        # Import is deliberately disabled on public UI; use owner-only migration workflow.
-        try:
-            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log.assign(tip=pd.to_datetime(log.tip,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT'),captured=pd.to_datetime(log.captured,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT')).rename(columns={'id':'賽事編號','tip':'開賽時間','captured':'預測時間','home':'主隊','away':'客隊','probability':'主隊勝率','hp':'主隊預測分','ap':'客隊預測分','actual':'主隊實際勝出'}),hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('雲端資料庫已設定' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
-            for col,n in zip(cc,[7,30,None]):
-                subset=done if n is None else done[dates>=pd.Timestamp(now)-pd.Timedelta(days=n)]
-                col.metric(('全部' if n is None else f'近 {n} 天')+'命中率',f'{((subset.probability>=.5)==subset.actual.astype(bool)).mean():.1%}' if len(subset) else '尚無',f'{len(subset)} 場',delta_color='off')
-        except Exception as e: st.warning(str(e))
-
-    with tabs[6]:
+    if page==labels[6]:
         from pinnacle_odds import render
         render(games, model, now, name, stamp, features, ET, HK, cloud_config(), cloud_odds, simulate, final)
 

@@ -4,7 +4,9 @@ import requests
 
 def request(config, method, **kwargs):
     url,key=config
-    r=requests.request(method,url+'/rest/v1/nba_pinnacle_odds',headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'return=minimal,resolution=ignore-duplicates'},timeout=20,**kwargs)
+    headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'return=minimal,resolution=ignore-duplicates'}
+    if key.startswith('sb_secret_'): headers.pop('Authorization',None)
+    r=requests.request(method,url+'/rest/v1/nba_pinnacle_odds',headers=headers,timeout=20,**kwargs)
     if not r.ok: raise ValueError(f'Pinnacle 雲端操作失敗 HTTP {r.status_code}')
     return r
 
