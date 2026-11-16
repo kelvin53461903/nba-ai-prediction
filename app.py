@@ -1,7 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests, time
+import requests, time, re, io
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+import pdfplumber
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -11,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-st.set_page_config(page_title='NBA AI V3.0', page_icon='🏀', layout='wide')
+st.set_page_config(page_title='NBA AI V3.1', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 @st.cache_data(ttl=300, show_spinner=False)
@@ -84,14 +87,59 @@ def train(rows):
     c=classifiers[cn].fit(X,Y[:,0]); reg=regressors[rn].fit(X,Y[:,1:])
     return c,reg,hist,metrics,scores,len(X),clean[-1][0],cn,rn,boundary
 
-st.title('🏀 NBA AI Prediction Platform V3.0')
+ET=ZoneInfo('America/New_York')
+TEAMS=['Atlanta Hawks','Boston Celtics','Brooklyn Nets','Charlotte Hornets','Chicago Bulls','Cleveland Cavaliers','Dallas Mavericks','Denver Nuggets','Detroit Pistons','Golden State Warriors','Houston Rockets','Indiana Pacers','LA Clippers','Los Angeles Lakers','Memphis Grizzlies','Miami Heat','Milwaukee Bucks','Minnesota Timberwolves','New Orleans Pelicans','New York Knicks','Oklahoma City Thunder','Orlando Magic','Philadelphia 76ers','Phoenix Suns','Portland Trail Blazers','Sacramento Kings','San Antonio Spurs','Toronto Raptors','Utah Jazz','Washington Wizards']
+STATUS=re.compile(r'\b(Out|Doubtful|Questionable|Probable|Available)\b')
+MATCH=re.compile(r'\b([A-Z]{2,3})\s*@\s*([A-Z]{2,3})\b')
+FILE=re.compile(r'Injury-Report_(\d{4}-\d{2}-\d{2})_(\d{2})_(\d{2})(AM|PM)\.pdf',re.I)
+def parse_report(blob):
+    records=[]; team=None; matchup=None; game_date=None; last=None
+    with pdfplumber.open(io.BytesIO(blob)) as pdf:
+        for page in pdf.pages:
+            for line in (page.extract_text(x_tolerance=2,y_tolerance=3) or '').splitlines():
+                line=' '.join(line.split())
+                dm=re.search(r'\b(\d{2}/\d{2}/\d{4})\b',line)
+                if dm: game_date=datetime.strptime(dm.group(1),'%m/%d/%Y').date()
+                mm=MATCH.search(line)
+                if mm: matchup='@'.join(mm.groups()); team=None; last=None
+                found=next((t for t in TEAMS if t in line),None)
+                if found: team=found; line=line.split(found,1)[1].strip(); last=None
+                if not team or not matchup or not game_date: continue
+                special=re.search(r'NOT YET SUBMITTED|NOT SUBMITTED|NONE',line,re.I)
+                if special:
+                    records.append(dict(team=team,matchup=matchup,date=game_date,player='',status=special.group().upper(),reason='')); last=None; continue
+                m=STATUS.search(line)
+                if m:
+                    player=line[:m.start()].strip(' -'); reason=line[m.end():].strip(' -')
+                    if ',' not in player: continue
+                    last=dict(team=team,matchup=matchup,date=game_date,player=player,status=m.group(),reason=reason); records.append(last)
+                elif last and line and not re.search(r'Page|Injury Report|Game Date|Current Status',line,re.I) and not mm and not dm and not found:
+                    last['reason']+=' '+line
+    if not records: raise ValueError('官方 PDF 未能辨識，可能需要更新解析器')
+    return records
+@st.cache_data(ttl=300,show_spinner=False)
+def official_report(season):
+    url=f'https://official.nba.com/nba-injury-report-{season}-{str(season+1)[-2:]}-season/'
+    headers={'User-Agent':'Mozilla/5.0 NBA injury report reader'}
+    r=requests.get(url,headers=headers,timeout=20); r.raise_for_status()
+    candidates=[]
+    for a in BeautifulSoup(r.text,'html.parser').find_all('a',href=True):
+        link=urljoin(url,a['href']); m=FILE.search(link)
+        if not m or urlparse(link).hostname not in ('ak-static.cms.nba.com','official.nba.com','cdn.nba.com'): continue
+        d,h,mi,ap=m.groups(); ts=datetime.strptime(f'{d} {h}:{mi}{ap.upper()}','%Y-%m-%d %I:%M%p').replace(tzinfo=ET)
+        if ts<=datetime.now(ET): candidates.append((ts,link))
+    if not candidates: raise ValueError('官方網站未找到可辨識 PDF 連結')
+    ts,link=max(candidates); r=requests.get(link,headers=headers,timeout=30); r.raise_for_status()
+    return parse_report(r.content),ts.astimezone(HK),link,datetime.now(HK)
+
+st.title('🏀 NBA AI Prediction Platform V3.1')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 try: saved=st.secrets.get('BDL_API_KEY','')
 except Exception: saved=''
 with st.sidebar:
     key=saved or st.text_input('BALLDONTLIE API Key',type='password')
     auto=st.checkbox('每 10 分鐘更新畫面',True)
-    if st.button('立即重新讀取賽程'): fetch.clear()
+    if st.button('立即重新讀取賽程'): fetch.clear(); official_report.clear()
     st.markdown('[API 申請](https://app.balldontlie.io/)')
 if not key: st.info('請輸入 API Key，毋須上傳 CSV。'); st.stop()
 
@@ -105,15 +153,20 @@ def dashboard():
     except Exception as e: st.error(f'賽程讀取失敗：{e}'); return
     st.caption('賽程讀取時間：'+updated)
     tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估'])
-    injuries=[]; injury_ok=False; injury_error=''; injury_time=''
+    injuries=[]; injury_ok=False; injury_error=''; injury_time=None; injury_url=''; read_time=None
     if games:
-        try: injuries,injury_time=fetch(key,'player_injuries',()); injury_ok=True
+        try: injuries,injury_time,injury_url,read_time=official_report(season); injury_ok=True
         except Exception as e: injury_error=str(e)
-    def related(tid): return [r for r in injuries if (r.get('player') or {}).get('team_id')==tid or ((r.get('player') or {}).get('team') or {}).get('id')==tid]
-    def risk(tid):
+    def related(g,t):
+        match=g['visitor_team']['abbreviation']+'@'+g['home_team']['abbreviation']
+        gd=stamp(g).tz_convert(ET).date()
+        return [r for r in injuries if r['date']==gd and r['matchup']==match and r['team']==name(t)]
+    def risk(g,t):
         if not injury_ok: return '未能查核'
-        rr=related(tid); statuses=[str(r.get('status','')).lower() for r in rr]
-        return f'Out {statuses.count("out")} / Doubtful {statuses.count("doubtful")} / Questionable {statuses.count("questionable")}' if rr else '未列出紀錄（非健康確認）'
+        rr=related(g,t)
+        if not rr or any('SUBMITTED' in r['status'] for r in rr): return '未提交或未能配對'
+        ss=[r['status'] for r in rr if not r['reason'].lower().startswith('g league')]
+        return f'Out {ss.count("Out")} / Doubtful {ss.count("Doubtful")} / Questionable {ss.count("Questionable")}（非健康確認）'
     model=None; history_time=''; error=''
     try:
         with st.spinner('自動取得歷史賽事並訓練模型；首次使用可能需數分鐘…'):
@@ -138,17 +191,22 @@ def dashboard():
                     else:
                         p=float(c.predict_proba([x])[0,1]); hp,ap=reg.predict([x])[0]
                         l,r=st.columns(2); l.metric(name(a),f'{ap:.0f} 分',f'勝率 {1-p:.1%}'); r.metric(name(h),f'{hp:.0f} 分',f'勝率 {p:.1%}'); st.progress(p,text=f'主隊勝率 {p:.1%}'); st.write('預測勝方：'+name(h if p>=.5 else a))
-                st.caption(f'客隊傷兵：{risk(a["id"])}｜主隊傷兵：{risk(h["id"])}（未納入勝率）')
+                st.caption(f'客隊傷兵：{risk(g,a)}｜主隊傷兵：{risk(g,h)}（未納入勝率）')
     with tabs[1]:
-        st.markdown('[NBA 官方傷兵報告](https://official.nba.com/)')
+        st.markdown(f'[NBA 官方傷兵報告](https://official.nba.com/nba-injury-report-{season}-{str(season+1)[-2:]}-season/)')
         if not injury_ok: st.warning('傷兵資料未能查核：'+(injury_error or '沒有當日賽程'))
         else:
-            st.caption('API 讀取時間：'+injury_time+'（不等於官方發布時間）')
+            st.caption(f'官方發布時間：{injury_time:%Y-%m-%d %H:%M} HKT｜讀取：{read_time:%Y-%m-%d %H:%M} HKT')
+            st.markdown(f'[查看原始 PDF]({injury_url})')
+            if (now-injury_time).total_seconds()>21600: st.warning('官方報告已超過六小時，請注意時效。')
             display=[]
-            for r in injuries:
-                p=r.get('player') or {}; display.append({'球員':f'{p.get("first_name", "")} {p.get("last_name", "")}','球隊 ID':p.get('team_id'),'狀態':r.get('status'),'說明':r.get('description'),'預計回歸':r.get('return_date')})
+            for g in games:
+                for t in (g['visitor_team'],g['home_team']):
+                    rr=related(g,t)
+                    if not rr: display.append({'球隊':name(t),'狀態':'未能配對／未列出','球員':'','原因':''})
+                    for r in rr: display.append({'球隊':r['team'],'球員':r['player'],'狀態':r['status'],'原因':r['reason']})
             st.dataframe(display,width='stretch',hide_index=True)
-            st.caption('未列出球員不代表健康；傷兵數量不是球員影響分數。')
+            st.caption('只顯示所選賽事配對結果；未列出不代表健康。傷兵風險獨立顯示，未經歷史傷兵資料驗證，不調整模型勝率。')
     with tabs[2]:
         q=st.text_input('球員英文名稱')
         if q.strip():
