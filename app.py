@@ -96,6 +96,8 @@ def cloud_config():
 def cloud_request(method, **kwargs):
     url,key=cloud_config()
     headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'resolution=ignore-duplicates,return=minimal'}
+    if key.startswith('sb_secret_'):
+             headers.pop('Authorization', None)
     r=requests.request(method,url+'/rest/v1/nba_predictions',headers=headers,timeout=20,**kwargs)
     if not r.ok: raise ValueError('雲端紀錄操作失敗 HTTP '+str(r.status_code))
     return r
