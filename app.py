@@ -8,13 +8,14 @@ import pdfplumber
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
+import sqlite3, os
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-st.set_page_config(page_title='NBA AI V4.0 PRO', page_icon='🏀', layout='wide')
+st.set_page_config(page_title='NBA AI V5.0 ELITE', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 @st.cache_data(ttl=300, show_spinner=False)
@@ -53,7 +54,30 @@ def features(hist,h,a,day):
             ar=np.array([r[1:4] for r in subset]); result.extend(ar.mean(axis=0))
         gap=(day-records[-1][0]).days
         result.extend([min(10,max(0,gap-1)),int(gap==1)])
+    result.extend([elo_rating(hist[h]),elo_rating(hist[a])])
     return result
+
+def elo_rating(records):
+    return records[-1][5] if records else 1500.0
+
+def simulate(hp,ap,residuals,seed):
+    rng=np.random.default_rng(seed)
+    draws=np.maximum(0,np.rint(np.array([hp,ap])+residuals[rng.integers(0,len(residuals),10000)]))
+    return draws
+
+def ledger(game, ts, p, hp, ap):
+    if datetime.now(HK)>=ts: return
+    with sqlite3.connect(os.environ.get('NBA_LEDGER','nba_predictions.sqlite'),timeout=10) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY, tip TEXT, captured TEXT, home TEXT, away TEXT, probability REAL, hp REAL, ap REAL, actual INTEGER)')
+        db.execute('INSERT OR IGNORE INTO predictions VALUES(?,?,?,?,?,?,?,?,NULL)',(game['id'],ts.isoformat(),datetime.now(HK).isoformat(),name(game['home_team']),name(game['visitor_team']),p,float(hp),float(ap)))
+
+def ledger_results(rows):
+    with sqlite3.connect(os.environ.get('NBA_LEDGER','nba_predictions.sqlite'),timeout=10) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY, tip TEXT, captured TEXT, home TEXT, away TEXT, probability REAL, hp REAL, ap REAL, actual INTEGER)')
+        for g in rows:
+            if final(g) and g.get('home_team_score') is not None and g.get('visitor_team_score') is not None:
+                db.execute('UPDATE predictions SET actual=? WHERE id=?',(int(g['home_team_score']>g['visitor_team_score']),g['id']))
+        return pd.read_sql_query('SELECT * FROM predictions ORDER BY tip DESC',db)
 
 @st.cache_resource(show_spinner=False,max_entries=4)
 def train(rows):
@@ -73,7 +97,8 @@ def train(rows):
             x=features(hist,h,a,day)
             if x is not None: X.append(x); Y.append([int(hp>ap),hp,ap]); days.append(day)
         for _,h,a,hp,ap in batch:
-            hist[h].append((day,hp,ap,int(hp>ap),1)); hist[a].append((day,ap,hp,int(ap>hp),0))
+            eh,ea=elo_rating(hist[h]),elo_rating(hist[a]); expected=1/(1+10**((ea-eh-65)/400)); change=20*(int(hp>ap)-expected)
+            hist[h].append((day,hp,ap,int(hp>ap),1,eh+change)); hist[a].append((day,ap,hp,int(ap>hp),0,ea-change))
     if len(X)<200: raise ValueError('有效歷史樣本不足 200 場')
     X=np.array(X); Y=np.array(Y); boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days); valday=days[int(len(X)*.65)]; val=sum(d<valday for d in days)
     classifiers={'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(max_iter=500)), 'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=8,min_samples_leaf=12,n_jobs=1,random_state=42)}
@@ -89,8 +114,9 @@ def train(rows):
     pp=c.predict_proba(X[split:])[:,1]; ss=reg.predict(X[split:]); actual=Y[split:,0]
     audit=pd.DataFrame({"日期":days[split:],"主隊預測勝率":pp,"主隊實際勝出":actual,"預測正確":(pp>=.5)==actual})
     report=(accuracy_score(actual,pp>=.5),brier_score_loss(actual,pp),mean_absolute_error(Y[split:,1],ss[:,0]),mean_absolute_error(Y[split:,2],ss[:,1]),audit)
+    residuals=Y[split:,1:]-ss
     c.fit(X,Y[:,0]); reg.fit(X,Y[:,1:])
-    return c,reg,hist,metrics,scores,len(X),clean[-1][0],cn,rn,boundary,report
+    return c,reg,hist,metrics,scores,len(X),clean[-1][0],cn,rn,boundary,report,residuals
 
 ET=ZoneInfo('America/New_York')
 TEAMS=['Atlanta Hawks','Boston Celtics','Brooklyn Nets','Charlotte Hornets','Chicago Bulls','Cleveland Cavaliers','Dallas Mavericks','Denver Nuggets','Detroit Pistons','Golden State Warriors','Houston Rockets','Indiana Pacers','LA Clippers','Los Angeles Lakers','Memphis Grizzlies','Miami Heat','Milwaukee Bucks','Minnesota Timberwolves','New Orleans Pelicans','New York Knicks','Oklahoma City Thunder','Orlando Magic','Philadelphia 76ers','Phoenix Suns','Portland Trail Blazers','Sacramento Kings','San Antonio Spurs','Toronto Raptors','Utah Jazz','Washington Wizards']
@@ -137,7 +163,7 @@ def official_report(season):
     ts,link=max(candidates); r=requests.get(link,headers=headers,timeout=30); r.raise_for_status()
     return parse_report(r.content),ts.astimezone(HK),link,datetime.now(HK)
 
-st.title('🏀 NBA AI Prediction Platform V4.0 PRO')
+st.title('🏀 NBA AI Prediction Platform V5.0 ELITE')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 try: saved=st.secrets.get('BDL_API_KEY','')
 except Exception: saved=''
@@ -157,7 +183,7 @@ def dashboard():
         games=sorted([g for g in games if not pd.isna(stamp(g)) and stamp(g).tz_convert(HK).date()==day],key=stamp)
     except Exception as e: st.error(f'賽程讀取失敗：{e}'); return
     st.caption('賽程讀取時間：'+updated)
-    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估'])
+    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄'])
     injuries=[]; injury_ok=False; injury_error=''; injury_time=None; injury_url=''; read_time=None
     if games:
         try: injuries,injury_time,injury_url,read_time=official_report(season); injury_ok=True
@@ -201,12 +227,21 @@ def dashboard():
                     else:
                         p=float(c.predict_proba([x])[0,1]); hp,ap=reg.predict([x])[0]
                         l,r=st.columns(2); l.metric(name(a),f'{ap:.0f} 分',f'勝率 {1-p:.1%}'); r.metric(name(h),f'{hp:.0f} 分',f'勝率 {p:.1%}'); st.progress(p,text=f'主隊勝率 {p:.1%}'); st.write('預測勝方：'+name(h if p>=.5 else a))
+                        try: ledger(g,ts,p,hp,ap)
+                        except Exception as e: st.caption('預測紀錄未保存：'+str(e))
+                        draws=simulate(hp,ap,model[11],int(g['id']))
+                        with st.expander('10,000 次比分模擬',expanded=True):
+                            lo,hi=np.quantile(draws,[.1,.9],axis=0); total=draws.sum(axis=1); tl,th=np.quantile(total,[.1,.9]); mc=(np.sum(draws[:,0]>draws[:,1])+.5*np.sum(draws[:,0]==draws[:,1]))/len(draws)
+                            st.write(f'主隊比分 80% 模擬區間：{lo[0]:.0f}–{hi[0]:.0f}；客隊：{lo[1]:.0f}–{hi[1]:.0f}')
+                            st.write(f'預測總分：{hp+ap:.1f}；80% 模擬區間 {tl:.0f}–{th:.0f}；模擬主勝率 {mc:.1%}')
+                            counts,edges=np.histogram(total,bins=20); st.bar_chart(pd.DataFrame({"總分":edges[:-1].astype(int),"次數":counts}).set_index("總分"))
+                            st.caption('以歷史測試比分殘差成對抽樣；非保證覆蓋率，模擬勝率獨立於分類模型。')
                         with st.expander('近期戰績、主客場及休息分析',expanded=True):
                             details=[]
                             for t,loc in [(a,0),(h,1)]:
                                 rec=hist[t['id']]; gap=(ts.tz_convert(ET).date()-rec[-1][0]).days
                                 venue=[r for r in rec if r[4]==loc][-10:]
-                                details.append({'球隊':name(t),'近5場勝率':f'{np.mean([r[3] for r in rec[-5:]]):.0%}','近10場勝率':f'{np.mean([r[3] for r in rec[-10:]]):.0%}','近10場得分':round(np.mean([r[1] for r in rec[-10:]]),1),'近10場失分':round(np.mean([r[2] for r in rec[-10:]]),1),'相同主客場勝率':f'{np.mean([r[3] for r in venue]):.0%}' if venue else '不足','休息日':max(0,gap-1),'背靠背':'是' if gap==1 else '否'})
+                                details.append({'球隊':name(t),'Elo':round(elo_rating(rec)), '近5場勝率':f'{np.mean([r[3] for r in rec[-5:]]):.0%}','近10場勝率':f'{np.mean([r[3] for r in rec[-10:]]):.0%}','近10場得分':round(np.mean([r[1] for r in rec[-10:]]),1),'近10場失分':round(np.mean([r[2] for r in rec[-10:]]),1),'相同主客場勝率':f'{np.mean([r[3] for r in venue]):.0%}' if venue else '不足','休息日':max(0,gap-1),'背靠背':'是' if gap==1 else '否'})
                             st.dataframe(details,width='stretch',hide_index=True)
                         st.caption(f'模型勝率距離五五波：{abs(p-.5):.1%}（不等於可靠度）')
                         ih,ia=impact(g,h),impact(g,a)
@@ -249,4 +284,15 @@ def dashboard():
             st.download_button('下載歷史回測結果',audit.to_csv(index=False).encode('utf-8-sig'),'backtest.csv','text/csv')
             st.caption('前約65%訓練、15%選模、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
         st.caption('模型使用近期 5、10 場得失分、勝率、主客場戰績及休息日。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
+    with tabs[4]:
+        if model:
+            teams={t['id']:name(t) for g in rows for t in (g['home_team'],g['visitor_team'])}
+            ranking=[{'球隊':teams.get(t,str(t)),'Elo':round(elo_rating(rec))} for t,rec in model[2].items() if rec]
+            st.dataframe(pd.DataFrame(ranking).sort_values('Elo',ascending=False),hide_index=True,width='stretch')
+            st.caption('Elo 初始1500、K=20、主場優勢65；設定未獨立調優。')
+    with tabs[5]:
+        try:
+            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log,hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('只保存首次實際開賽前預測；Cloud 本機儲存可能於重啟或重新部署遺失，請定期匯出。')
+        except Exception as e: st.warning(str(e))
+
 dashboard()
