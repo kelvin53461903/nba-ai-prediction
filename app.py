@@ -1,324 +1,164 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
-from datetime import date, timedelta, datetime
+import requests, time
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from collections import deque
-import hashlib
+from collections import defaultdict
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import accuracy_score, mean_absolute_error
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-st.set_page_config(page_title="NBA AI Predictor", page_icon="🏀", layout="wide")
-BASE = "https://api.balldontlie.io/v1"
+st.set_page_config(page_title='NBA AI V3.0', page_icon='🏀', layout='wide')
+HK=ZoneInfo('Asia/Hong_Kong')
+BASE='https://api.balldontlie.io/v1/'
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch(key, endpoint, pairs):
+    rows=[]; cursor=None; seen=set()
+    for _ in range(250):
+        params=list(pairs)+[('per_page',100)]
+        if cursor is not None: params.append(('cursor',cursor))
+        for attempt in range(4):
+            r=requests.get(BASE+endpoint,params=params,headers={'Authorization':key},timeout=30)
+            if r.status_code!=429: break
+            if attempt<3: time.sleep(65)
+        if r.status_code in (401,403): raise ValueError('API Key 無效或方案未授權此功能。')
+        if r.status_code==429: raise ValueError('API 次數限制，請稍後再試。')
+        if not r.ok: raise ValueError(f'API 錯誤 HTTP {r.status_code}')
+        obj=r.json(); rows.extend(obj['data']); cursor=obj.get('meta',{}).get('next_cursor')
+        if cursor is None: return rows, datetime.now(HK).isoformat(timespec='seconds')
+        if cursor in seen: raise ValueError('API 分頁異常')
+        seen.add(cursor)
+    raise ValueError('API 分頁未完整，未使用不完整資料')
 
-st.title("🏀 NBA AI Prediction Platform V2.0")
-st.caption("賽程・球員・傷兵・AI 勝負及比分預測 | 資料以 API 回傳時間為準")
+@st.cache_data(ttl=21600, show_spinner=False)
+def history(key, season):
+    return fetch(key,'games',tuple(('seasons[]',s) for s in range(season-2,season+1)))
 
+def stamp(g): return pd.to_datetime(g.get('datetime'),utc=True,errors='coerce')
+def name(t): return t.get('full_name',t.get('abbreviation','?'))
+def final(g): return str(g.get('status','')).lower().startswith('final') and not g.get('postponed')
+def features(hist,h,a,day):
+    result=[]
+    for tid,loc in [(h,1),(a,0)]:
+        records=hist[tid]
+        if len(records)<5: return None
+        for subset in [records[-5:],records[-15:], [r for r in records if r[4]==loc][-10:]]:
+            if not subset: subset=records[-5:]
+            ar=np.array([r[1:4] for r in subset]); result.extend(ar.mean(axis=0))
+        result.append(min(10,max(0,(day-records[-1][0]).days)))
+    return result
+
+@st.cache_resource(show_spinner=False,max_entries=4)
+def train(rows):
+    clean=[]; seen=set()
+    for g in rows:
+        if not final(g) or g.get('id') in seen: continue
+        try:
+            ts=stamp(g); d=ts.date() if not pd.isna(ts) else pd.Timestamp(g['date']).date()
+            h=g['home_team']['id']; a=g['visitor_team']['id']; hp=int(g['home_team_score']); ap=int(g['visitor_team_score'])
+            if hp<=0 or ap<=0 or hp==ap: continue
+        except (KeyError,TypeError,ValueError): continue
+        seen.add(g['id']); clean.append((d,h,a,hp,ap))
+    clean.sort(); hist=defaultdict(list); X=[]; Y=[]; days=[]
+    for day in sorted({r[0] for r in clean}):
+        batch=[r for r in clean if r[0]==day]
+        for _,h,a,hp,ap in batch:
+            x=features(hist,h,a,day)
+            if x is not None: X.append(x); Y.append([int(hp>ap),hp,ap]); days.append(day)
+        for _,h,a,hp,ap in batch:
+            hist[h].append((day,hp,ap,int(hp>ap),1)); hist[a].append((day,ap,hp,int(ap>hp),0))
+    if len(X)<200: raise ValueError('有效歷史樣本不足 200 場')
+    X=np.array(X); Y=np.array(Y); boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days)
+    classifiers={'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(max_iter=500)), 'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=8,min_samples_leaf=12,n_jobs=1,random_state=42)}
+    regressors={'Ridge':make_pipeline(StandardScaler(),Ridge(alpha=10)), 'Random Forest':RandomForestRegressor(n_estimators=80,max_depth=9,min_samples_leaf=10,n_jobs=1,random_state=42)}
+    metrics=[]
+    for n,m in classifiers.items():
+        m.fit(X[:split],Y[:split,0]); p=m.predict_proba(X[split:])[:,1]; metrics.append({'模型':n,'準確率':accuracy_score(Y[split:,0],p>=.5),'Brier':brier_score_loss(Y[split:,0],p)})
+    scores=[]
+    for n,m in regressors.items():
+        m.fit(X[:split],Y[:split,1:]); p=m.predict(X[split:]); scores.append({'模型':n,'主隊 MAE':mean_absolute_error(Y[split:,1],p[:,0]),'客隊 MAE':mean_absolute_error(Y[split:,2],p[:,1])})
+    cn=min(metrics,key=lambda r:r['Brier'])['模型']; rn=min(scores,key=lambda r:r['主隊 MAE']+r['客隊 MAE'])['模型']
+    c=classifiers[cn].fit(X,Y[:,0]); reg=regressors[rn].fit(X,Y[:,1:])
+    return c,reg,hist,metrics,scores,len(X),clean[-1][0],cn,rn,boundary
+
+st.title('🏀 NBA AI Prediction Platform V3.0')
+st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
+try: saved=st.secrets.get('BDL_API_KEY','')
+except Exception: saved=''
 with st.sidebar:
-    st.header("資料連線")
-    api_key = st.text_input("BALLDONTLIE API Key", type="password",
-                            help="API key 只在本次 Streamlit session 使用；不要公開分享。")
-    st.markdown("[申請 API Key](https://app.balldontlie.io/)")
-    st.caption("Free：球隊、球員基本資料、賽程。球員比賽數據及傷兵資料需要付費權限。")
-    st.divider()
-    st.header("預測設定")
-    form_n = st.slider("近期比賽樣本數", 3, 15, 8)
-    st.caption("模型會用歷史賽果建立近期球隊狀態。")
+    key=saved or st.text_input('BALLDONTLIE API Key',type='password')
+    auto=st.checkbox('每 10 分鐘更新畫面',True)
+    if st.button('立即重新讀取賽程'): fetch.clear()
+    st.markdown('[API 申請](https://app.balldontlie.io/)')
+if not key: st.info('請輸入 API Key，毋須上傳 CSV。'); st.stop()
 
-def api_get(path, params=None):
-    if not api_key:
-        raise RuntimeError("請先在左側輸入 BALLDONTLIE API Key。")
-    r = requests.get(f"{BASE}/{path.lstrip('/')}",
-                     headers={"Authorization": api_key},
-                     params=params or {}, timeout=25)
-    if r.status_code == 401:
-        raise RuntimeError("API Key 無效，或你的方案沒有此 API 權限（HTTP 401）。")
-    if r.status_code == 429:
-        raise RuntimeError("API 請求次數已達上限（HTTP 429），請稍後再試。")
-    r.raise_for_status()
-    return r.json()
-
-@st.cache_data(ttl=600, show_spinner=False)
-def cached_api_get(path, params_tuple, key_fingerprint):
-    # key_fingerprint separates cached results per API key without storing the key in cache key display.
-    params = dict(params_tuple)
-    return api_get(path, params)
-
-def get_data(path, params=None):
-    return cached_api_get(path, tuple(sorted((params or {}).items())), hash(api_key))
-
-def records(payload):
-    d = payload.get("data", [])
-    return d if isinstance(d, list) else ([d] if d else [])
-
-def team_frame():
-    return pd.DataFrame(records(get_data("teams")))
-
-def games_for_day(day):
-    items = []
-    for d in (day - timedelta(days=1), day):
-        items.extend(records(get_data("games", {"dates[]": d.isoformat(), "per_page": 100})))
-    result = []
-    seen = set()
-    for g in items:
-        ts = pd.to_datetime(g.get("datetime"), utc=True, errors="coerce")
-        if pd.isna(ts) or ts.tz_convert("Asia/Hong_Kong").date() != day:
-            continue
-        if g.get("id") in seen:
-            continue
-        seen.add(g.get("id"))
-        g = dict(g)
-        g["hk_time"] = ts.tz_convert("Asia/Hong_Kong").strftime("%Y-%m-%d %H:%M")
-        result.append(g)
-    return pd.DataFrame(result)
-
-def injuries_data():
-    return pd.DataFrame(records(get_data("player_injuries", {"per_page": 100})))
-
-def player_search(term):
-    return pd.DataFrame(records(get_data("players/active", {"search": term, "per_page": 100})))
-
-def team_name(team):
-    return team.get("full_name", team.get("abbreviation", "Unknown"))
-
-def fmt_game(row):
-    h = row.get("home_team", {}) or {}
-    a = row.get("visitor_team", {}) or {}
-    return f"{a.get('abbreviation','?')} @ {h.get('abbreviation','?')}"
-
-if not api_key:
-    st.info("請先在左側輸入 API Key。你可以先申請免費 Key，免費方案可讀取球隊、球員基本資料及賽程。")
-    st.markdown("**API 申請：** [BALLDONTLIE](https://app.balldontlie.io/)")
-    st.stop()
-
-tabs = st.tabs(["📅 今日賽程", "🏥 傷兵中心", "👤 球員搜尋", "🤖 AI 比賽預測", "⚙️ 資料與模型"])
-
-# --- schedule ---
-with tabs[0]:
-    st.subheader("NBA 賽程")
-    chosen_day = st.date_input("選擇比賽日期（香港時間）", value=datetime.now(ZoneInfo("Asia/Hong_Kong")).date())
-    if st.button("更新賽程", key="refresh_games"):
-        st.cache_data.clear()
+@st.fragment(run_every=600 if auto else None)
+def dashboard():
+    now=datetime.now(HK); today=now.date(); season=today.year if today.month>=9 else today.year-1
+    day=st.date_input('比賽日期（香港時間）',today)
     try:
-        games = games_for_day(chosen_day)
-        if games.empty:
-            st.info("該日期沒有找到賽事，或資料供應商尚未更新。")
-        else:
-            view = []
-            for _, g in games.iterrows():
-                h = g.get("home_team") or {}
-                a = g.get("visitor_team") or {}
-                view.append({
-                    "客隊": team_name(a), "主隊": team_name(h),
-                    "客隊得分": g.get("visitor_team_score"),
-                    "主隊得分": g.get("home_team_score"),
-                    "狀態": g.get("status_state", g.get("status", "未知")),
-                    "開賽時間（香港）": g.get("hk_time", "未提供")
-                })
-            st.dataframe(pd.DataFrame(view), width="stretch", hide_index=True)
-            st.caption("賽程及即時比分由 BALLDONTLIE API 提供；實際更新頻率視供應商而定。")
-    except Exception as e:
-        st.error(f"讀取賽程失敗：{e}")
-
-# --- injuries ---
-with tabs[1]:
-    st.subheader("傷兵中心")
-    st.write("傷兵資料需 API 帳戶具有 Player Injuries 權限。官方 NBA 傷兵報告亦會持續更新。")
-    st.markdown("[NBA 官方 2026–27 傷兵報告](https://official.nba.com/nba-injury-report-2026-27-season/)")
-    if st.button("載入傷兵名單", key="load_injuries"):
-        st.cache_data.clear()
+        games,updated=fetch(key,'games',tuple(('dates[]',d.isoformat()) for d in [day-timedelta(days=1),day,day+timedelta(days=1)]))
+        games=sorted([g for g in games if not pd.isna(stamp(g)) and stamp(g).tz_convert(HK).date()==day],key=stamp)
+    except Exception as e: st.error(f'賽程讀取失敗：{e}'); return
+    st.caption('賽程讀取時間：'+updated)
+    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估'])
+    injuries=[]; injury_ok=False; injury_error=''; injury_time=''
+    if games:
+        try: injuries,injury_time=fetch(key,'player_injuries',()); injury_ok=True
+        except Exception as e: injury_error=str(e)
+    def related(tid): return [r for r in injuries if (r.get('player') or {}).get('team_id')==tid or ((r.get('player') or {}).get('team') or {}).get('id')==tid]
+    def risk(tid):
+        if not injury_ok: return '未能查核'
+        rr=related(tid); statuses=[str(r.get('status','')).lower() for r in rr]
+        return f'Out {statuses.count("out")} / Doubtful {statuses.count("doubtful")} / Questionable {statuses.count("questionable")}' if rr else '未列出紀錄（非健康確認）'
+    model=None; history_time=''; error=''
     try:
-        inj = injuries_data()
-        if inj.empty:
-            st.info("目前 API 沒有回傳傷兵紀錄。")
+        with st.spinner('自動取得歷史賽事並訓練模型；首次使用可能需數分鐘…'):
+            rows,history_time=history(key,season); model=train(rows)
+    except Exception as e: error=str(e)
+    with tabs[0]:
+        if error: st.warning('模型暫不可用：'+error)
+        if model: st.caption(f'歷史資料截至 {model[6]}（UTC 日期）；讀取時間 {history_time}；預測只使用賽前資料')
+        if not games: st.info('該日期沒有已取得的賽事。')
+        for g in games:
+            h=g['home_team']; a=g['visitor_team']; ts=stamp(g).tz_convert(HK)
+            with st.container(border=True):
+                st.caption(f'{ts:%Y-%m-%d %H:%M} HKT · {g.get("status", "未知")}')
+                st.subheader(f'{name(a)} @ {name(h)}')
+                if final(g): st.write(f'完場：{g.get("visitor_team_score")} – {g.get("home_team_score")}')
+                elif ts<=now or g.get('postponed'): st.write('已到開賽時間或延期；不產生賽前預測。')
+                elif model:
+                    c,reg,hist,*_=model
+                    x=features(hist,h['id'],a['id'],ts.tz_convert('UTC').date())
+                    stale=(ts.tz_convert('UTC').date()-model[6]).days>14
+                    if x is None or stale: st.warning('近期資料不足或過舊，暫不預測。')
+                    else:
+                        p=float(c.predict_proba([x])[0,1]); hp,ap=reg.predict([x])[0]
+                        l,r=st.columns(2); l.metric(name(a),f'{ap:.0f} 分',f'勝率 {1-p:.1%}'); r.metric(name(h),f'{hp:.0f} 分',f'勝率 {p:.1%}'); st.progress(p,text=f'主隊勝率 {p:.1%}'); st.write('預測勝方：'+name(h if p>=.5 else a))
+                st.caption(f'客隊傷兵：{risk(a["id"])}｜主隊傷兵：{risk(h["id"])}（未納入勝率）')
+    with tabs[1]:
+        st.markdown('[NBA 官方傷兵報告](https://official.nba.com/)')
+        if not injury_ok: st.warning('傷兵資料未能查核：'+(injury_error or '沒有當日賽程'))
         else:
-            out = []
-            for _, x in inj.iterrows():
-                p = x.get("player") or {}
-                out.append({
-                    "球員": f"{p.get('first_name','')} {p.get('last_name','')}".strip(),
-                    "球隊 ID": p.get("team_id"),
-                    "狀態": x.get("status", "未提供"),
-                    "預計回歸": x.get("return_date", "未提供"),
-                    "傷病／備註": x.get("description", "")
-                })
-            st.dataframe(pd.DataFrame(out), width="stretch", hide_index=True)
-            st.warning("傷兵狀態可能隨時改變；預測前請再次核對官方報告。")
-    except Exception as e:
-        st.error(f"無法讀取傷兵資料：{e}")
-        st.info("BALLDONTLIE 的 Player Injuries 並非免費方案功能。可先查看 NBA 官方傷兵報告。")
-
-# --- player search ---
-with tabs[2]:
-    st.subheader("球員資料搜尋")
-    q = st.text_input("輸入球員英文名字，例如 Stephen Curry")
-    if st.button("搜尋球員", key="search_player") and q.strip():
-        try:
-            players = player_search(q.strip())
-            if players.empty:
-                st.info("找不到球員。")
-            else:
-                out = []
-                for _, p in players.iterrows():
-                    t = p.get("team") or {}
-                    out.append({
-                        "球員": f"{p.get('first_name','')} {p.get('last_name','')}".strip(),
-                        "位置": p.get("position", ""),
-                        "球衣號碼": p.get("jersey_number", ""),
-                        "球隊": team_name(t) if t else "未提供",
-                        "球員 ID": p.get("id")
-                    })
-                st.dataframe(pd.DataFrame(out), width="stretch", hide_index=True)
-        except Exception as e:
-            st.error(f"搜尋失敗：{e}")
-    st.caption("免費 API 可搜尋球員基本資料；詳細比賽統計及賽季平均數據視 API 方案而定。")
-
-# --- model / prediction ---
-with tabs[3]:
-    st.subheader("AI 比賽預測")
-    st.write("上傳歷史賽事 CSV，模型會使用每隊近期表現建立預測。若未上傳資料，暫時不能產生可信的 AI 預測。")
-    hist_file = st.file_uploader("上傳歷史 NBA games.csv", type=["csv"], key="hist_upload")
-    required = ["GAME_DATE_EST", "HOME_TEAM_ID", "VISITOR_TEAM_ID", "PTS_home", "PTS_away", "HOME_TEAM_WINS"]
-    signature = (hashlib.sha256(hist_file.getvalue()).hexdigest(), form_n) if hist_file is not None else None
-    if st.session_state.get("model_signature") != signature:
-        st.session_state.pop("nba_model", None)
-    train_clicked = st.button("訓練 AI 模型", disabled=hist_file is None, type="primary")
-    if hist_file is not None and train_clicked:
-        st.session_state.pop("nba_model", None)
-        progress = st.progress(0, text="讀取歷史數據…")
-        try:
-            raw = pd.read_csv(hist_file)
-            missing = [c for c in required if c not in raw.columns]
-            if missing:
-                st.error("CSV 欠缺欄位：" + ", ".join(missing))
-            else:
-                raw = raw[required].copy()
-                raw["GAME_DATE_EST"] = pd.to_datetime(raw["GAME_DATE_EST"], errors="coerce")
-                for c in required[1:]:
-                    raw[c] = pd.to_numeric(raw[c], errors="coerce")
-                raw = raw.dropna().drop_duplicates().sort_values("GAME_DATE_EST")
-                raw = raw[raw.HOME_TEAM_WINS.isin([0, 1]) & (raw.PTS_home > 0) & (raw.PTS_away > 0)]
-                raw = raw.tail(12000)
-                if len(raw) < 50:
-                    raise ValueError("至少需要 50 場有效比賽。")
-                progress.progress(15, text="建立球隊近期表現…")
-                hist = {}
-                rows = []
-                for dt, day_games in raw.groupby("GAME_DATE_EST", sort=True):
-                    pending = []
-                    for _, g in day_games.iterrows():
-                        h, a = int(g.HOME_TEAM_ID), int(g.VISITOR_TEAM_ID)
-                        def team_stats(t):
-                            seq = list(hist.get(t, []))[-form_n:]
-                            if not seq:
-                                return [0.5, 110, 110]
-                            return [np.mean([z[0] for z in seq]),
-                                    np.mean([z[1] for z in seq]),
-                                    np.mean([z[2] for z in seq])]
-                        hs, aws = team_stats(h), team_stats(a)
-                        rows.append({
-                            "home_id": h, "away_id": a,
-                            "home_win_rate": hs[0], "home_for": hs[1], "home_against": hs[2],
-                            "away_win_rate": aws[0], "away_for": aws[1], "away_against": aws[2],
-                            "home_win": int(g.HOME_TEAM_WINS),
-                            "home_pts": float(g.PTS_home), "away_pts": float(g.PTS_away)
-                        })
-                        pending.append((h, a, int(g.HOME_TEAM_WINS), float(g.PTS_home), float(g.PTS_away)))
-                    for h, a, w, hp, ap in pending:
-                        hist.setdefault(h, deque(maxlen=form_n)).append((w, hp, ap))
-                        hist.setdefault(a, deque(maxlen=form_n)).append((1-w, ap, hp))
-                train = pd.DataFrame(rows)
-                feats = ["home_win_rate", "home_for", "home_against", "away_win_rate", "away_for", "away_against"]
-                if len(train) < 50:
-                    st.warning("歷史賽事少於 50 場，模型結果可能不穩定。")
-                if len(train) >= 20:
-                    cut = max(1, int(len(train)*0.8))
-                    Xtr, Xte = train[feats].iloc[:cut], train[feats].iloc[cut:]
-                    clf = RandomForestClassifier(n_estimators=40, max_depth=8, min_samples_leaf=8, n_jobs=1, random_state=42, class_weight="balanced")
-                    rh = RandomForestRegressor(n_estimators=40, max_depth=8, min_samples_leaf=8, n_jobs=1, random_state=42)
-                    ra = RandomForestRegressor(n_estimators=40, max_depth=8, min_samples_leaf=8, n_jobs=1, random_state=42)
-                    progress.progress(40, text="訓練勝率模型…")
-                    clf.fit(Xtr, train.home_win.iloc[:cut])
-                    progress.progress(60, text="訓練主隊比分模型…")
-                    rh.fit(Xtr, train.home_pts.iloc[:cut])
-                    progress.progress(80, text="訓練客隊比分模型…")
-                    ra.fit(Xtr, train.away_pts.iloc[:cut])
-                    if len(Xte):
-                        st.metric("按時間切分測試準確率", f"{accuracy_score(train.home_win.iloc[cut:], clf.predict(Xte)):.1%}")
-                        st.caption(f"測試集主隊 MAE {mean_absolute_error(train.home_pts.iloc[cut:], rh.predict(Xte)):.1f} 分；客隊 MAE {mean_absolute_error(train.away_pts.iloc[cut:], ra.predict(Xte)):.1f} 分")
-                    st.session_state["nba_model"] = (clf, rh, ra, hist, feats)
-                    st.session_state["model_signature"] = signature
-                    st.session_state["model_last_date"] = raw.GAME_DATE_EST.max().strftime("%Y-%m-%d")
-                    progress.progress(100, text="訓練完成")
-                    st.success(f"模型訓練完成：{len(train):,} 場歷史比賽。")
-        except Exception as e:
-            st.error(f"無法處理歷史 CSV：{e}")
-
-    model = st.session_state.get("nba_model")
-    if model:
-        clf, rh, ra, hist, feats = model
-        st.caption("歷史資料截止：" + st.session_state.get("model_last_date", "未知"))
-        st.warning("若歷史資料並非最新球季，結果只適用於示範及測試，不能代表目前球隊實力。")
-        try:
-            teams = team_frame()
-            if not teams.empty:
-                nba_codes = "ATL BOS CLE NOP CHI DAL DEN GSW HOU LAC LAL MIA MIL MIN BKN NYK ORL IND PHI PHX POR SAC SAS OKC TOR UTA MEM WAS DET CHA".split()
-                # NBA stats IDs have a fixed franchise mapping, not BALLDONTLIE IDs.
-                nba_ids = dict(zip(nba_codes, [1610612737,1610612738,1610612739,1610612740,1610612741,1610612742,1610612743,1610612744,1610612745,1610612746,1610612747,1610612748,1610612749,1610612750,1610612751,1610612752,1610612753,1610612754,1610612755,1610612756,1610612757,1610612758,1610612759,1610612760,1610612761,1610612762,1610612763,1610612764,1610612765,1610612766]))
-                team_options = {f"{r['full_name']} ({r['abbreviation']})": nba_ids.get(r['abbreviation'], int(r['id'])) for _, r in teams.iterrows() if nba_ids.get(r['abbreviation'], int(r['id'])) in hist}
-                if len(team_options) < 2:
-                    raise ValueError("歷史 CSV 與球隊 ID 無法配對。")
-                c1, c2 = st.columns(2)
-                with c1:
-                    home_label = st.selectbox("主場球隊", list(team_options.keys()), key="pred_home")
-                with c2:
-                    away_choices = [x for x in team_options if x != home_label]
-                    away_label = st.selectbox("客場球隊", away_choices, key="pred_away")
-                def stats_for(tid):
-                    arr = list(hist.get(tid, []))[-form_n:]
-                    if not arr:
-                        return [0.5, 110, 110]
-                    return [np.mean([z[0] for z in arr]), np.mean([z[1] for z in arr]), np.mean([z[2] for z in arr])]
-                if st.button("開始 AI 預測", type="primary"):
-                    hs, aws = stats_for(team_options[home_label]), stats_for(team_options[away_label])
-                    sample = pd.DataFrame([{
-                        "home_win_rate": hs[0], "home_for": hs[1], "home_against": hs[2],
-                        "away_win_rate": aws[0], "away_for": aws[1], "away_against": aws[2]
-                    }])[feats]
-                    pr = clf.predict_proba(sample)[0]
-                    home_prob = float(pr[list(clf.classes_).index(1)]) if 1 in clf.classes_ else 0.5
-                    home_pts = max(0, float(rh.predict(sample)[0]))
-                    away_pts = max(0, float(ra.predict(sample)[0]))
-                    a, b = st.columns(2)
-                    a.metric(home_label, f"{home_pts:.0f} 分", f"勝率 {home_prob:.1%}")
-                    b.metric(away_label, f"{away_pts:.0f} 分", f"勝率 {1-home_prob:.1%}")
-                    st.success("預測勝方：" + (home_label if home_prob >= 0.5 else away_label))
-                    st.caption("此版本模型使用歷史球隊近期數據；傷兵資料會獨立顯示，尚未自動轉換成球員缺陣分數。")
-        except Exception as e:
-            st.error(f"準備預測時發生錯誤：{e}")
-    else:
-        st.info("請先上傳歷史賽事 CSV 並完成模型訓練。")
-
-# --- settings ---
-with tabs[4]:
-    st.subheader("資料來源及模型說明")
-    st.markdown("""
-    **資料來源**
-    - BALLDONTLIE NBA API：球隊、球員、賽程、比分及（視方案而定）球員統計、傷兵資料。
-    - NBA 官方傷兵報告：可作為傷兵狀態的交叉核對來源。
-
-    **模型**
-    - 輕量 Random Forest（每組 40 棵樹，深度最多 8；最近最多 12,000 場）：
-    - Random Forest 分類器：預測主隊勝出機率。
-    - Random Forest 回歸器：分別預測主隊及客隊得分。
-    - 特徵：每隊最近 N 場勝率、得分及失分平均。
-    - 按日期排序並以較早賽事訓練、較後賽事測試，避免隨機切分造成未來資料洩漏。
-
-    **注意**
-    - 目前不是醫療／傷病診斷工具；傷兵狀態可能變動。
-    - 未有可靠的球員出賽分鐘或先發名單時，不會假裝已量化傷兵對比分的影響。
-    - 不保證預測正確，亦不應視為投注建議。
-    """)
-    st.markdown("[BALLDONTLIE API 文件](https://docs.balldontlie.io/) · [NBA 官方傷兵報告](https://official.nba.com/nba-injury-report-2026-27-season/)")
-
+            st.caption('API 讀取時間：'+injury_time+'（不等於官方發布時間）')
+            display=[]
+            for r in injuries:
+                p=r.get('player') or {}; display.append({'球員':f'{p.get("first_name", "")} {p.get("last_name", "")}','球隊 ID':p.get('team_id'),'狀態':r.get('status'),'說明':r.get('description'),'預計回歸':r.get('return_date')})
+            st.dataframe(display,width='stretch',hide_index=True)
+            st.caption('未列出球員不代表健康；傷兵數量不是球員影響分數。')
+    with tabs[2]:
+        q=st.text_input('球員英文名稱')
+        if q.strip():
+            try:
+                players,_=fetch(key,'players',(('search',q.strip()),)); st.dataframe([{'球員':p.get('first_name','')+' '+p.get('last_name',''),'球隊':name(p.get('team') or {}),'位置':p.get('position')} for p in players],width='stretch')
+            except Exception as e: st.warning(str(e))
+    with tabs[3]:
+        if model:
+            st.write(f'有效樣本：{model[5]}｜測試起始日期：{model[9]}｜採用 {model[7]} / {model[8]}')
+            st.dataframe(model[3],width='stretch'); st.dataframe(model[4],width='stretch')
+            st.caption('按時間切分 80/20；同一測試集用於模型選擇，因此不是獨立最終驗證。Brier 越低越好。')
+        st.caption('模型使用近期 5、15 場得失分、勝率、主客場戰績及休息日。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
+dashboard()
