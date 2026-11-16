@@ -313,7 +313,15 @@ def dashboard():
                     if x is None or stale: st.warning('近期資料不足或過舊，暫不預測。')
                     else:
                         p=float(c.predict_proba([x])[0,1]); hp,ap=reg.predict([x])[0]
-                        l,r=st.columns(2); l.metric(name(a),f'{ap:.0f} 分',f'勝率 {1-p:.1%}'); r.metric(name(h),f'{hp:.0f} 分',f'勝率 {p:.1%}'); st.progress(p,text=f'主隊勝率 {p:.1%}'); st.write('預測勝方：'+name(h if p>=.5 else a))
+                        l,r=st.columns(2)
+                        l.metric(name(a),f'{ap:.0f} 分')
+                        r.metric(name(h),f'{hp:.0f} 分')
+                        st.markdown('**AI 獨贏勝率**')
+                        left,right=st.columns(2)
+                        left.write(f'{name(a)}（客隊）：{1-p:.1%}')
+                        right.write(f'{name(h)}（主隊）：{p:.1%}')
+                        st.markdown(f'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden"><div style="width:{(1-p)*100:.6f}%;background:#3785ce"></div><div style="width:{p*100:.6f}%;background:#259569"></div></div>',unsafe_allow_html=True)
+                        st.write('預測勝方：'+name(h if p>=.5 else a))
                         try: ledger(g,ts,p,hp,ap)
                         except Exception as e: st.caption('預測紀錄未保存：'+str(e))
                         draws=simulate(hp,ap,model[11],int(g['id']))
