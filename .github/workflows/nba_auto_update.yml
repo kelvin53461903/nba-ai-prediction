@@ -1,0 +1,39 @@
+name: NBA AI Auto Update
+
+on:
+  schedule:
+    - cron: '15 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-auto-update
+  cancel-in-progress: false
+
+jobs:
+  nba-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run NBA AI background update
+        env:
+          NBA_WORKER: '1'
+          BDL_API_KEY: ${{ secrets.BDL_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python app.py
