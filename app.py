@@ -21,6 +21,19 @@ from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_los
 if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.2 LITE SPREAD', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
+NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
+
+def show_team_logo(column, team):
+    abbr = str(team.get("abbreviation", "")).upper()
+    abbr = {"BRK":"BKN", "PHO":"PHX", "NO":"NOP", "NY":"NYK", "GS":"GSW", "SA":"SAS", "UTAH":"UTA", "WSH":"WAS"}.get(abbr, abbr)
+    logo_id = NBA_LOGO_IDS.get(abbr)
+    with column:
+        if logo_id:
+            st.markdown(f'<img src="https://cdn.nba.com/logos/nba/{logo_id}/primary/L/logo.svg" alt="{abbr} logo" width="90" height="90" style="object-fit:contain" />', unsafe_allow_html=True)
+        else:
+            st.caption("🏀 NBA")
+        st.caption(name(team))
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch(key, endpoint, pairs):
     rows=[]; cursor=None; seen=set()
@@ -304,6 +317,9 @@ def dashboard():
             with st.container(border=True):
                 st.caption(f'{ts:%Y-%m-%d %H:%M} HKT · {g.get("status", "未知")}')
                 st.subheader(f'{name(a)} @ {name(h)}')
+                logo_left, logo_right = st.columns(2)
+                show_team_logo(logo_left, a)
+                show_team_logo(logo_right, h)
                 if final(g): st.write(f'完場：{g.get("visitor_team_score")} – {g.get("home_team_score")}')
                 elif ts<=now or g.get('postponed'): st.write('已到開賽時間或延期；不產生賽前預測。')
                 elif model:
