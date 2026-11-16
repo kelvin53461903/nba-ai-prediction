@@ -17,7 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V6.2 ULTRA ODDS', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.0 ULTIMATE', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 @st.cache_data(ttl=300, show_spinner=False)
@@ -228,12 +228,22 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V6.2 ULTRA ODDS')
+st.title('🏀 NBA AI Prediction Platform V7.0 ULTIMATE')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
-try: saved=st.secrets.get('BDL_API_KEY','')
-except Exception: saved=''
+def configured_key():
+    for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
+        value=os.environ.get(field)
+        if value and value.strip(): return value.strip()
+        try:
+            value=st.secrets.get(field,'')
+            if value and str(value).strip(): return str(value).strip()
+        except Exception: pass
+    return ''
+saved=configured_key()
 with st.sidebar:
-    key=saved or st.text_input('BALLDONTLIE API Key',type='password')
+    key=saved or st.text_input('BALLDONTLIE API Key',type='password',key='manual_api_key').strip()
+    if saved: st.success('已自動載入 API Key')
+    else: st.caption('可在 Streamlit Secrets 設定 BDL_API_KEY，免重複輸入。')
     auto=st.checkbox('每 10 分鐘更新畫面',True)
     if st.button('立即重新讀取賽程'): fetch.clear(); official_report.clear()
     st.markdown('[API 申請](https://app.balldontlie.io/)')

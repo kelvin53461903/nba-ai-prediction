@@ -38,6 +38,16 @@ def render(games, model, now, name, stamp, features, ET, HK):
                 if x is not None: p=float(c.predict_proba([x])[0,1]); hp,ap=map(float,reg.predict([x])[0])
             row.update({'AI主勝率':p,'AI客勝率':None if p is None else 1-p,'AI預測主客分差':None if hp is None else hp-ap,'AI預測總分':None if hp is None else hp+ap})
             st.session_state.db_rows.append(row)
+    backup=st.file_uploader('還原先前匯出的賠率 CSV（目前工作階段）',type=['csv'],key='db_backup')
+    if backup is not None and st.button('還原 CSV',key='restore_odds'):
+        try:
+            restored=pd.read_csv(backup,dtype={'賽事ID':str})
+            required={'賽事ID','主隊','客隊','開賽時間','匯入時間','主隊賠率','客隊賠率','市場主勝率','市場客勝率','原始隱含率合計','主隊讓分','大小分界線','AI主勝率','AI客勝率','AI預測主客分差','AI預測總分'}
+            if not required.issubset(restored.columns): raise ValueError('CSV 欄位不完整')
+            merged=pd.concat([pd.DataFrame(st.session_state.db_rows),restored[list(sorted(required))]],ignore_index=True).drop_duplicates(subset=['賽事ID','匯入時間'],keep='first')
+            st.session_state.db_rows=merged.to_dict('records')
+            st.success('已還原至目前工作階段')
+        except Exception as e: st.warning('還原失敗：'+str(e))
     data=pd.DataFrame(st.session_state.db_rows)
     if not data.empty:
         current=data[data['賽事ID']==selected]
