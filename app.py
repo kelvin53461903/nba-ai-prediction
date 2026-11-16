@@ -9,13 +9,15 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 import sqlite3, os
+from sklearn.ensemble import VotingClassifier, VotingRegressor
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-st.set_page_config(page_title='NBA AI V5.0 ELITE', page_icon='🏀', layout='wide')
+st.set_page_config(page_title='NBA AI V6.0 ULTRA', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 @st.cache_data(ttl=300, show_spinner=False)
@@ -65,17 +67,44 @@ def simulate(hp,ap,residuals,seed):
     draws=np.maximum(0,np.rint(np.array([hp,ap])+residuals[rng.integers(0,len(residuals),10000)]))
     return draws
 
+def cloud_config():
+    try: return str(st.secrets['SUPABASE_URL']).rstrip('/'),str(st.secrets['SUPABASE_SERVICE_KEY'])
+    except Exception: return None
+
+def cloud_request(method, **kwargs):
+    url,key=cloud_config()
+    headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'resolution=ignore-duplicates,return=minimal'}
+    r=requests.request(method,url+'/rest/v1/nba_predictions',headers=headers,timeout=20,**kwargs)
+    if not r.ok: raise ValueError('雲端紀錄操作失敗 HTTP '+str(r.status_code))
+    return r
+
 def ledger(game, ts, p, hp, ap):
-    if datetime.now(HK)>=ts: return
+    captured=datetime.now(HK)
+    if captured>=ts: return
+    row=dict(id=int(game['id']),tip=ts.isoformat(),captured=captured.isoformat(),home=name(game['home_team']),away=name(game['visitor_team']),probability=float(p),hp=float(hp),ap=float(ap))
+    if cloud_config(): cloud_request('POST',json=row,params={'on_conflict':'id'}); return
     with sqlite3.connect(os.environ.get('NBA_LEDGER','nba_predictions.sqlite'),timeout=10) as db:
         db.execute('CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY, tip TEXT, captured TEXT, home TEXT, away TEXT, probability REAL, hp REAL, ap REAL, actual INTEGER)')
-        db.execute('INSERT OR IGNORE INTO predictions VALUES(?,?,?,?,?,?,?,?,NULL)',(game['id'],ts.isoformat(),datetime.now(HK).isoformat(),name(game['home_team']),name(game['visitor_team']),p,float(hp),float(ap)))
+        db.execute('INSERT OR IGNORE INTO predictions VALUES(?,?,?,?,?,?,?,?,NULL)',tuple(row.values()))
 
 def ledger_results(rows):
+    cols=['id','tip','captured','home','away','probability','hp','ap','actual']
+    if cloud_config():
+        records=[]
+        for offset in range(0,100000,500):
+            page=cloud_request('GET',params={'select':'*','order':'id.asc','limit':500,'offset':offset}).json(); records.extend(page)
+            if len(page)<500: break
+        pending={r['id'] for r in records if r.get('actual') is None}
+        for g in rows:
+            if g['id'] in pending and final(g) and g.get('home_team_score') and g.get('visitor_team_score'):
+                actual=int(g['home_team_score']>g['visitor_team_score']); cloud_request('PATCH',params={'id':'eq.'+str(g['id'])},json={'actual':actual})
+                for r in records:
+                    if r['id']==g['id']: r['actual']=actual; break
+        return pd.DataFrame(records,columns=cols).sort_values('tip',ascending=False)
     with sqlite3.connect(os.environ.get('NBA_LEDGER','nba_predictions.sqlite'),timeout=10) as db:
         db.execute('CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY, tip TEXT, captured TEXT, home TEXT, away TEXT, probability REAL, hp REAL, ap REAL, actual INTEGER)')
         for g in rows:
-            if final(g) and g.get('home_team_score') is not None and g.get('visitor_team_score') is not None:
+            if final(g) and g.get('home_team_score') and g.get('visitor_team_score'):
                 db.execute('UPDATE predictions SET actual=? WHERE id=?',(int(g['home_team_score']>g['visitor_team_score']),g['id']))
         return pd.read_sql_query('SELECT * FROM predictions ORDER BY tip DESC',db)
 
@@ -103,6 +132,7 @@ def train(rows):
     X=np.array(X); Y=np.array(Y); boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days); valday=days[int(len(X)*.65)]; val=sum(d<valday for d in days)
     classifiers={'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(max_iter=500)), 'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=8,min_samples_leaf=12,n_jobs=1,random_state=42)}
     regressors={'Ridge':make_pipeline(StandardScaler(),Ridge(alpha=10)), 'Random Forest':RandomForestRegressor(n_estimators=80,max_depth=9,min_samples_leaf=10,n_jobs=1,random_state=42)}
+    classifiers["融合模型"]=VotingClassifier([(str(i),clone(m)) for i,m in enumerate(classifiers.values())],voting="soft")
     metrics=[]
     for n,m in classifiers.items():
         m.fit(X[:val],Y[:val,0]); p=m.predict_proba(X[val:split])[:,1]; metrics.append({'模型':n,'準確率':accuracy_score(Y[val:split,0],p>=.5),'Brier':brier_score_loss(Y[val:split,0],p)})
@@ -163,7 +193,8 @@ def official_report(season):
     ts,link=max(candidates); r=requests.get(link,headers=headers,timeout=30); r.raise_for_status()
     return parse_report(r.content),ts.astimezone(HK),link,datetime.now(HK)
 
-st.title('🏀 NBA AI Prediction Platform V5.0 ELITE')
+st.markdown("""<style>.stApp {background:#101827;color:#e5e7eb} [data-testid=stHeader]{background:#101827} [data-testid=stSidebar]{background:#172235} [data-testid=stMetricValue],h1,h2,h3,p,label{color:#e5e7eb !important}</style>""",unsafe_allow_html=True)
+st.title('🏀 NBA AI Prediction Platform V6.0 ULTRA')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 try: saved=st.secrets.get('BDL_API_KEY','')
 except Exception: saved=''
@@ -243,6 +274,17 @@ def dashboard():
                                 venue=[r for r in rec if r[4]==loc][-10:]
                                 details.append({'球隊':name(t),'Elo':round(elo_rating(rec)), '近5場勝率':f'{np.mean([r[3] for r in rec[-5:]]):.0%}','近10場勝率':f'{np.mean([r[3] for r in rec[-10:]]):.0%}','近10場得分':round(np.mean([r[1] for r in rec[-10:]]),1),'近10場失分':round(np.mean([r[2] for r in rec[-10:]]),1),'相同主客場勝率':f'{np.mean([r[3] for r in venue]):.0%}' if venue else '不足','休息日':max(0,gap-1),'背靠背':'是' if gap==1 else '否'})
                             st.dataframe(details,width='stretch',hide_index=True)
+                        with st.expander('歷史交手與球隊得失分分析'):
+                            matches=[]
+                            for old in rows:
+                                if final(old) and not pd.isna(stamp(old)) and stamp(old)<stamp(g) and {old['home_team']['id'],old['visitor_team']['id']}=={h['id'],a['id']}:
+                                    matches.append(old)
+                            matches=sorted(matches,key=stamp,reverse=True)[:10]
+                            st.dataframe([{'日期':stamp(o).tz_convert(HK).strftime('%Y-%m-%d'),'主隊':name(o['home_team']),'客隊':name(o['visitor_team']),'主隊得分':o['home_team_score'],'客隊得分':o['visitor_team_score']} for o in matches],hide_index=True)
+                            st.caption('得失分並非每百回合攻防效率；免費賽果資料不足以計算真實 Pace。')
+                        with st.expander('官方球員缺陣清單'):
+                            st.dataframe([{'球隊':r['team'],'球員':r['player'],'狀態':r['status'],'原因':r['reason']} for t in (a,h) for r in related(g,t)],hide_index=True)
+                            st.caption('未具備歷史球員出勤及貢獻資料，不推算球星個別勝率影響。')
                         st.caption(f'模型勝率距離五五波：{abs(p-.5):.1%}（不等於可靠度）')
                         ih,ia=impact(g,h),impact(g,a)
                         if ih is not None and ia is not None:
@@ -292,7 +334,10 @@ def dashboard():
             st.caption('Elo 初始1500、K=20、主場優勢65；設定未獨立調優。')
     with tabs[5]:
         try:
-            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log,hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('只保存首次實際開賽前預測；Cloud 本機儲存可能於重啟或重新部署遺失，請定期匯出。')
+            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log,hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('雲端資料庫已設定' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
+            for col,n in zip(cc,[7,30,None]):
+                subset=done if n is None else done[dates>=pd.Timestamp(now)-pd.Timedelta(days=n)]
+                col.metric(('全部' if n is None else f'近 {n} 天')+'命中率',f'{((subset.probability>=.5)==subset.actual.astype(bool)).mean():.1%}' if len(subset) else '尚無',f'{len(subset)} 場',delta_color='off')
         except Exception as e: st.warning(str(e))
 
 dashboard()
