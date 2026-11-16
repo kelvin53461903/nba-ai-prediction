@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-st.set_page_config(page_title='NBA AI V3.1', page_icon='🏀', layout='wide')
+st.set_page_config(page_title='NBA AI V4.0 PRO', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 @st.cache_data(ttl=300, show_spinner=False)
@@ -48,10 +48,11 @@ def features(hist,h,a,day):
     for tid,loc in [(h,1),(a,0)]:
         records=hist[tid]
         if len(records)<5: return None
-        for subset in [records[-5:],records[-15:], [r for r in records if r[4]==loc][-10:]]:
+        for subset in [records[-5:],records[-10:], [r for r in records if r[4]==loc][-10:]]:
             if not subset: subset=records[-5:]
             ar=np.array([r[1:4] for r in subset]); result.extend(ar.mean(axis=0))
-        result.append(min(10,max(0,(day-records[-1][0]).days)))
+        gap=(day-records[-1][0]).days
+        result.extend([min(10,max(0,gap-1)),int(gap==1)])
     return result
 
 @st.cache_resource(show_spinner=False,max_entries=4)
@@ -60,7 +61,7 @@ def train(rows):
     for g in rows:
         if not final(g) or g.get('id') in seen: continue
         try:
-            ts=stamp(g); d=ts.date() if not pd.isna(ts) else pd.Timestamp(g['date']).date()
+            ts=stamp(g); d=ts.tz_convert(ET).date() if not pd.isna(ts) else pd.Timestamp(g['date']).date()
             h=g['home_team']['id']; a=g['visitor_team']['id']; hp=int(g['home_team_score']); ap=int(g['visitor_team_score'])
             if hp<=0 or ap<=0 or hp==ap: continue
         except (KeyError,TypeError,ValueError): continue
@@ -74,18 +75,22 @@ def train(rows):
         for _,h,a,hp,ap in batch:
             hist[h].append((day,hp,ap,int(hp>ap),1)); hist[a].append((day,ap,hp,int(ap>hp),0))
     if len(X)<200: raise ValueError('有效歷史樣本不足 200 場')
-    X=np.array(X); Y=np.array(Y); boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days)
+    X=np.array(X); Y=np.array(Y); boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days); valday=days[int(len(X)*.65)]; val=sum(d<valday for d in days)
     classifiers={'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(max_iter=500)), 'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=8,min_samples_leaf=12,n_jobs=1,random_state=42)}
     regressors={'Ridge':make_pipeline(StandardScaler(),Ridge(alpha=10)), 'Random Forest':RandomForestRegressor(n_estimators=80,max_depth=9,min_samples_leaf=10,n_jobs=1,random_state=42)}
     metrics=[]
     for n,m in classifiers.items():
-        m.fit(X[:split],Y[:split,0]); p=m.predict_proba(X[split:])[:,1]; metrics.append({'模型':n,'準確率':accuracy_score(Y[split:,0],p>=.5),'Brier':brier_score_loss(Y[split:,0],p)})
+        m.fit(X[:val],Y[:val,0]); p=m.predict_proba(X[val:split])[:,1]; metrics.append({'模型':n,'準確率':accuracy_score(Y[val:split,0],p>=.5),'Brier':brier_score_loss(Y[val:split,0],p)})
     scores=[]
     for n,m in regressors.items():
-        m.fit(X[:split],Y[:split,1:]); p=m.predict(X[split:]); scores.append({'模型':n,'主隊 MAE':mean_absolute_error(Y[split:,1],p[:,0]),'客隊 MAE':mean_absolute_error(Y[split:,2],p[:,1])})
+        m.fit(X[:val],Y[:val,1:]); p=m.predict(X[val:split]); scores.append({'模型':n,'主隊 MAE':mean_absolute_error(Y[val:split,1],p[:,0]),'客隊 MAE':mean_absolute_error(Y[val:split,2],p[:,1])})
     cn=min(metrics,key=lambda r:r['Brier'])['模型']; rn=min(scores,key=lambda r:r['主隊 MAE']+r['客隊 MAE'])['模型']
-    c=classifiers[cn].fit(X,Y[:,0]); reg=regressors[rn].fit(X,Y[:,1:])
-    return c,reg,hist,metrics,scores,len(X),clean[-1][0],cn,rn,boundary
+    c=classifiers[cn].fit(X[:split],Y[:split,0]); reg=regressors[rn].fit(X[:split],Y[:split,1:])
+    pp=c.predict_proba(X[split:])[:,1]; ss=reg.predict(X[split:]); actual=Y[split:,0]
+    audit=pd.DataFrame({"日期":days[split:],"主隊預測勝率":pp,"主隊實際勝出":actual,"預測正確":(pp>=.5)==actual})
+    report=(accuracy_score(actual,pp>=.5),brier_score_loss(actual,pp),mean_absolute_error(Y[split:,1],ss[:,0]),mean_absolute_error(Y[split:,2],ss[:,1]),audit)
+    c.fit(X,Y[:,0]); reg.fit(X,Y[:,1:])
+    return c,reg,hist,metrics,scores,len(X),clean[-1][0],cn,rn,boundary,report
 
 ET=ZoneInfo('America/New_York')
 TEAMS=['Atlanta Hawks','Boston Celtics','Brooklyn Nets','Charlotte Hornets','Chicago Bulls','Cleveland Cavaliers','Dallas Mavericks','Denver Nuggets','Detroit Pistons','Golden State Warriors','Houston Rockets','Indiana Pacers','LA Clippers','Los Angeles Lakers','Memphis Grizzlies','Miami Heat','Milwaukee Bucks','Minnesota Timberwolves','New Orleans Pelicans','New York Knicks','Oklahoma City Thunder','Orlando Magic','Philadelphia 76ers','Phoenix Suns','Portland Trail Blazers','Sacramento Kings','San Antonio Spurs','Toronto Raptors','Utah Jazz','Washington Wizards']
@@ -132,7 +137,7 @@ def official_report(season):
     ts,link=max(candidates); r=requests.get(link,headers=headers,timeout=30); r.raise_for_status()
     return parse_report(r.content),ts.astimezone(HK),link,datetime.now(HK)
 
-st.title('🏀 NBA AI Prediction Platform V3.1')
+st.title('🏀 NBA AI Prediction Platform V4.0 PRO')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 try: saved=st.secrets.get('BDL_API_KEY','')
 except Exception: saved=''
@@ -161,6 +166,11 @@ def dashboard():
         match=g['visitor_team']['abbreviation']+'@'+g['home_team']['abbreviation']
         gd=stamp(g).tz_convert(ET).date()
         return [r for r in injuries if r['date']==gd and r['matchup']==match and r['team']==name(t)]
+    def impact(g,t):
+        rr=related(g,t)
+        if not injury_ok or not rr or any('SUBMITTED' in r['status'] for r in rr) or (now-injury_time).total_seconds()>21600: return None
+        weights={'Out':1.,'Doubtful':.75,'Questionable':.5,'Probable':.25,'Available':0.}
+        return sum(weights.get(r['status'],0) for r in rr if r['player'] and not re.search(r'g[ -]?league|two.way|on assignment',r['reason'],re.I))
     def risk(g,t):
         if not injury_ok: return '未能查核'
         rr=related(g,t)
@@ -174,7 +184,7 @@ def dashboard():
     except Exception as e: error=str(e)
     with tabs[0]:
         if error: st.warning('模型暫不可用：'+error)
-        if model: st.caption(f'歷史資料截至 {model[6]}（UTC 日期）；讀取時間 {history_time}；預測只使用賽前資料')
+        if model: st.caption(f'歷史資料截至 {model[6]}（美東賽事日期）；讀取時間 {history_time}；預測只使用賽前資料')
         if not games: st.info('該日期沒有已取得的賽事。')
         for g in games:
             h=g['home_team']; a=g['visitor_team']; ts=stamp(g).tz_convert(HK)
@@ -185,13 +195,28 @@ def dashboard():
                 elif ts<=now or g.get('postponed'): st.write('已到開賽時間或延期；不產生賽前預測。')
                 elif model:
                     c,reg,hist,*_=model
-                    x=features(hist,h['id'],a['id'],ts.tz_convert('UTC').date())
-                    stale=(ts.tz_convert('UTC').date()-model[6]).days>14
+                    x=features(hist,h['id'],a['id'],ts.tz_convert(ET).date())
+                    stale=(ts.tz_convert(ET).date()-model[6]).days>14
                     if x is None or stale: st.warning('近期資料不足或過舊，暫不預測。')
                     else:
                         p=float(c.predict_proba([x])[0,1]); hp,ap=reg.predict([x])[0]
                         l,r=st.columns(2); l.metric(name(a),f'{ap:.0f} 分',f'勝率 {1-p:.1%}'); r.metric(name(h),f'{hp:.0f} 分',f'勝率 {p:.1%}'); st.progress(p,text=f'主隊勝率 {p:.1%}'); st.write('預測勝方：'+name(h if p>=.5 else a))
-                st.caption(f'客隊傷兵：{risk(g,a)}｜主隊傷兵：{risk(g,h)}（未納入勝率）')
+                        with st.expander('近期戰績、主客場及休息分析',expanded=True):
+                            details=[]
+                            for t,loc in [(a,0),(h,1)]:
+                                rec=hist[t['id']]; gap=(ts.tz_convert(ET).date()-rec[-1][0]).days
+                                venue=[r for r in rec if r[4]==loc][-10:]
+                                details.append({'球隊':name(t),'近5場勝率':f'{np.mean([r[3] for r in rec[-5:]]):.0%}','近10場勝率':f'{np.mean([r[3] for r in rec[-10:]]):.0%}','近10場得分':round(np.mean([r[1] for r in rec[-10:]]),1),'近10場失分':round(np.mean([r[2] for r in rec[-10:]]),1),'相同主客場勝率':f'{np.mean([r[3] for r in venue]):.0%}' if venue else '不足','休息日':max(0,gap-1),'背靠背':'是' if gap==1 else '否'})
+                            st.dataframe(details,width='stretch',hide_index=True)
+                        st.caption(f'模型勝率距離五五波：{abs(p-.5):.1%}（不等於可靠度）')
+                        ih,ia=impact(g,h),impact(g,a)
+                        if ih is not None and ia is not None:
+                            # Explicit unvalidated scenario, not learned player contribution.
+                            delta=float(np.clip(ia-ih,-5,5)); adj=float(np.clip(p+.015*delta,.01,.99))
+                            st.write(f'傷兵情境（示範）：主隊 {adj:.1%}｜客隊 {1-adj:.1%}；主隊勝率變動 {(adj-p)*100:+.1f} 個百分點')
+                            st.caption('假設每單位缺陣風險改變 1.5 個百分點，上限 7.5；非回測校準，不改正式預測或比分。')
+                        else: st.info('傷兵報告未完整或過期，不計算調整情境。')
+                st.caption(f'客隊傷兵：{risk(g,a)}｜主隊傷兵：{risk(g,h)}（原始模型未納入傷兵）')
     with tabs[1]:
         st.markdown(f'[NBA 官方傷兵報告](https://official.nba.com/nba-injury-report-{season}-{str(season+1)[-2:]}-season/)')
         if not injury_ok: st.warning('傷兵資料未能查核：'+(injury_error or '沒有當日賽程'))
@@ -217,6 +242,11 @@ def dashboard():
         if model:
             st.write(f'有效樣本：{model[5]}｜測試起始日期：{model[9]}｜採用 {model[7]} / {model[8]}')
             st.dataframe(model[3],width='stretch'); st.dataframe(model[4],width='stretch')
-            st.caption('按時間切分 80/20；同一測試集用於模型選擇，因此不是獨立最終驗證。Brier 越低越好。')
-        st.caption('模型使用近期 5、15 場得失分、勝率、主客場戰績及休息日。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
+            acc,brier,hmae,amae,audit=model[10]
+            st.subheader('獨立歷史測試（最後約 20%）')
+            c1,c2,c3=st.columns(3); c1.metric('勝方準確率',f'{acc:.1%}'); c2.metric('Brier',f'{brier:.3f}'); c3.metric('比分 MAE',f'{hmae:.1f} / {amae:.1f}')
+            st.line_chart(audit.assign(累積準確率=audit['預測正確'].expanding().mean()).reset_index(drop=True)['累積準確率'])
+            st.download_button('下載歷史回測結果',audit.to_csv(index=False).encode('utf-8-sig'),'backtest.csv','text/csv')
+            st.caption('前約65%訓練、15%選模、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
+        st.caption('模型使用近期 5、10 場得失分、勝率、主客場戰績及休息日。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
 dashboard()
