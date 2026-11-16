@@ -2,14 +2,17 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+from zoneinfo import ZoneInfo
+from collections import deque
+import hashlib
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import accuracy_score, mean_absolute_error
 
 st.set_page_config(page_title="NBA AI Predictor", page_icon="🏀", layout="wide")
 BASE = "https://api.balldontlie.io/v1"
 
-st.title("🏀 NBA AI Prediction Platform")
+st.title("🏀 NBA AI Prediction Platform V2.0")
 st.caption("賽程・球員・傷兵・AI 勝負及比分預測 | 資料以 API 回傳時間為準")
 
 with st.sidebar:
@@ -53,7 +56,22 @@ def team_frame():
     return pd.DataFrame(records(get_data("teams")))
 
 def games_for_day(day):
-    return pd.DataFrame(records(get_data("games", {"dates[]": day.isoformat(), "per_page": 100})))
+    items = []
+    for d in (day - timedelta(days=1), day):
+        items.extend(records(get_data("games", {"dates[]": d.isoformat(), "per_page": 100})))
+    result = []
+    seen = set()
+    for g in items:
+        ts = pd.to_datetime(g.get("datetime"), utc=True, errors="coerce")
+        if pd.isna(ts) or ts.tz_convert("Asia/Hong_Kong").date() != day:
+            continue
+        if g.get("id") in seen:
+            continue
+        seen.add(g.get("id"))
+        g = dict(g)
+        g["hk_time"] = ts.tz_convert("Asia/Hong_Kong").strftime("%Y-%m-%d %H:%M")
+        result.append(g)
+    return pd.DataFrame(result)
 
 def injuries_data():
     return pd.DataFrame(records(get_data("player_injuries", {"per_page": 100})))
@@ -79,7 +97,7 @@ tabs = st.tabs(["📅 今日賽程", "🏥 傷兵中心", "👤 球員搜尋", "
 # --- schedule ---
 with tabs[0]:
     st.subheader("NBA 賽程")
-    chosen_day = st.date_input("選擇比賽日期", value=date.today())
+    chosen_day = st.date_input("選擇比賽日期（香港時間）", value=datetime.now(ZoneInfo("Asia/Hong_Kong")).date())
     if st.button("更新賽程", key="refresh_games"):
         st.cache_data.clear()
     try:
@@ -96,9 +114,9 @@ with tabs[0]:
                     "客隊得分": g.get("visitor_team_score"),
                     "主隊得分": g.get("home_team_score"),
                     "狀態": g.get("status_state", g.get("status", "未知")),
-                    "開賽時間": g.get("datetime", g.get("date", ""))
+                    "開賽時間（香港）": g.get("hk_time", "未提供")
                 })
-            st.dataframe(pd.DataFrame(view), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(view), width="stretch", hide_index=True)
             st.caption("賽程及即時比分由 BALLDONTLIE API 提供；實際更新頻率視供應商而定。")
     except Exception as e:
         st.error(f"讀取賽程失敗：{e}")
@@ -125,7 +143,7 @@ with tabs[1]:
                     "預計回歸": x.get("return_date", "未提供"),
                     "傷病／備註": x.get("description", "")
                 })
-            st.dataframe(pd.DataFrame(out), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(out), width="stretch", hide_index=True)
             st.warning("傷兵狀態可能隨時改變；預測前請再次核對官方報告。")
     except Exception as e:
         st.error(f"無法讀取傷兵資料：{e}")
@@ -151,7 +169,7 @@ with tabs[2]:
                         "球隊": team_name(t) if t else "未提供",
                         "球員 ID": p.get("id")
                     })
-                st.dataframe(pd.DataFrame(out), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(out), width="stretch", hide_index=True)
         except Exception as e:
             st.error(f"搜尋失敗：{e}")
     st.caption("免費 API 可搜尋球員基本資料；詳細比賽統計及賽季平均數據視 API 方案而定。")
@@ -162,7 +180,13 @@ with tabs[3]:
     st.write("上傳歷史賽事 CSV，模型會使用每隊近期表現建立預測。若未上傳資料，暫時不能產生可信的 AI 預測。")
     hist_file = st.file_uploader("上傳歷史 NBA games.csv", type=["csv"], key="hist_upload")
     required = ["GAME_DATE_EST", "HOME_TEAM_ID", "VISITOR_TEAM_ID", "PTS_home", "PTS_away", "HOME_TEAM_WINS"]
-    if hist_file is not None:
+    signature = (hashlib.sha256(hist_file.getvalue()).hexdigest(), form_n) if hist_file is not None else None
+    if st.session_state.get("model_signature") != signature:
+        st.session_state.pop("nba_model", None)
+    train_clicked = st.button("訓練 AI 模型", disabled=hist_file is None, type="primary")
+    if hist_file is not None and train_clicked:
+        st.session_state.pop("nba_model", None)
+        progress = st.progress(0, text="讀取歷史數據…")
         try:
             raw = pd.read_csv(hist_file)
             missing = [c for c in required if c not in raw.columns]
@@ -173,7 +197,12 @@ with tabs[3]:
                 raw["GAME_DATE_EST"] = pd.to_datetime(raw["GAME_DATE_EST"], errors="coerce")
                 for c in required[1:]:
                     raw[c] = pd.to_numeric(raw[c], errors="coerce")
-                raw = raw.dropna().sort_values("GAME_DATE_EST")
+                raw = raw.dropna().drop_duplicates().sort_values("GAME_DATE_EST")
+                raw = raw[raw.HOME_TEAM_WINS.isin([0, 1]) & (raw.PTS_home > 0) & (raw.PTS_away > 0)]
+                raw = raw.tail(12000)
+                if len(raw) < 50:
+                    raise ValueError("至少需要 50 場有效比賽。")
+                progress.progress(15, text="建立球隊近期表現…")
                 hist = {}
                 rows = []
                 for dt, day_games in raw.groupby("GAME_DATE_EST", sort=True):
@@ -181,7 +210,7 @@ with tabs[3]:
                     for _, g in day_games.iterrows():
                         h, a = int(g.HOME_TEAM_ID), int(g.VISITOR_TEAM_ID)
                         def team_stats(t):
-                            seq = hist.get(t, [])[-form_n:]
+                            seq = list(hist.get(t, []))[-form_n:]
                             if not seq:
                                 return [0.5, 110, 110]
                             return [np.mean([z[0] for z in seq]),
@@ -197,8 +226,8 @@ with tabs[3]:
                         })
                         pending.append((h, a, int(g.HOME_TEAM_WINS), float(g.PTS_home), float(g.PTS_away)))
                     for h, a, w, hp, ap in pending:
-                        hist.setdefault(h, []).append((w, hp, ap))
-                        hist.setdefault(a, []).append((1-w, ap, hp))
+                        hist.setdefault(h, deque(maxlen=form_n)).append((w, hp, ap))
+                        hist.setdefault(a, deque(maxlen=form_n)).append((1-w, ap, hp))
                 train = pd.DataFrame(rows)
                 feats = ["home_win_rate", "home_for", "home_against", "away_win_rate", "away_for", "away_against"]
                 if len(train) < 50:
@@ -206,16 +235,22 @@ with tabs[3]:
                 if len(train) >= 20:
                     cut = max(1, int(len(train)*0.8))
                     Xtr, Xte = train[feats].iloc[:cut], train[feats].iloc[cut:]
-                    clf = RandomForestClassifier(n_estimators=250, random_state=42, class_weight="balanced")
-                    rh = RandomForestRegressor(n_estimators=250, random_state=42)
-                    ra = RandomForestRegressor(n_estimators=250, random_state=42)
+                    clf = RandomForestClassifier(n_estimators=40, max_depth=8, min_samples_leaf=8, n_jobs=1, random_state=42, class_weight="balanced")
+                    rh = RandomForestRegressor(n_estimators=40, max_depth=8, min_samples_leaf=8, n_jobs=1, random_state=42)
+                    ra = RandomForestRegressor(n_estimators=40, max_depth=8, min_samples_leaf=8, n_jobs=1, random_state=42)
+                    progress.progress(40, text="訓練勝率模型…")
                     clf.fit(Xtr, train.home_win.iloc[:cut])
+                    progress.progress(60, text="訓練主隊比分模型…")
                     rh.fit(Xtr, train.home_pts.iloc[:cut])
+                    progress.progress(80, text="訓練客隊比分模型…")
                     ra.fit(Xtr, train.away_pts.iloc[:cut])
                     if len(Xte):
                         st.metric("按時間切分測試準確率", f"{accuracy_score(train.home_win.iloc[cut:], clf.predict(Xte)):.1%}")
                         st.caption(f"測試集主隊 MAE {mean_absolute_error(train.home_pts.iloc[cut:], rh.predict(Xte)):.1f} 分；客隊 MAE {mean_absolute_error(train.away_pts.iloc[cut:], ra.predict(Xte)):.1f} 分")
                     st.session_state["nba_model"] = (clf, rh, ra, hist, feats)
+                    st.session_state["model_signature"] = signature
+                    st.session_state["model_last_date"] = raw.GAME_DATE_EST.max().strftime("%Y-%m-%d")
+                    progress.progress(100, text="訓練完成")
                     st.success(f"模型訓練完成：{len(train):,} 場歷史比賽。")
         except Exception as e:
             st.error(f"無法處理歷史 CSV：{e}")
@@ -223,10 +258,17 @@ with tabs[3]:
     model = st.session_state.get("nba_model")
     if model:
         clf, rh, ra, hist, feats = model
+        st.caption("歷史資料截止：" + st.session_state.get("model_last_date", "未知"))
+        st.warning("若歷史資料並非最新球季，結果只適用於示範及測試，不能代表目前球隊實力。")
         try:
             teams = team_frame()
             if not teams.empty:
-                team_options = {f"{r['full_name']} ({r['abbreviation']})": int(r["id"]) for _, r in teams.iterrows()}
+                nba_codes = "ATL BOS CLE NOP CHI DAL DEN GSW HOU LAC LAL MIA MIL MIN BKN NYK ORL IND PHI PHX POR SAC SAS OKC TOR UTA MEM WAS DET CHA".split()
+                # NBA stats IDs have a fixed franchise mapping, not BALLDONTLIE IDs.
+                nba_ids = dict(zip(nba_codes, [1610612737,1610612738,1610612739,1610612740,1610612741,1610612742,1610612743,1610612744,1610612745,1610612746,1610612747,1610612748,1610612749,1610612750,1610612751,1610612752,1610612753,1610612754,1610612755,1610612756,1610612757,1610612758,1610612759,1610612760,1610612761,1610612762,1610612763,1610612764,1610612765,1610612766]))
+                team_options = {f"{r['full_name']} ({r['abbreviation']})": nba_ids.get(r['abbreviation'], int(r['id'])) for _, r in teams.iterrows() if nba_ids.get(r['abbreviation'], int(r['id'])) in hist}
+                if len(team_options) < 2:
+                    raise ValueError("歷史 CSV 與球隊 ID 無法配對。")
                 c1, c2 = st.columns(2)
                 with c1:
                     home_label = st.selectbox("主場球隊", list(team_options.keys()), key="pred_home")
@@ -234,7 +276,7 @@ with tabs[3]:
                     away_choices = [x for x in team_options if x != home_label]
                     away_label = st.selectbox("客場球隊", away_choices, key="pred_away")
                 def stats_for(tid):
-                    arr = hist.get(tid, [])[-form_n:]
+                    arr = list(hist.get(tid, []))[-form_n:]
                     if not arr:
                         return [0.5, 110, 110]
                     return [np.mean([z[0] for z in arr]), np.mean([z[1] for z in arr]), np.mean([z[2] for z in arr])]
@@ -267,6 +309,7 @@ with tabs[4]:
     - NBA 官方傷兵報告：可作為傷兵狀態的交叉核對來源。
 
     **模型**
+    - 輕量 Random Forest（每組 40 棵樹，深度最多 8；最近最多 12,000 場）：
     - Random Forest 分類器：預測主隊勝出機率。
     - Random Forest 回歸器：分別預測主隊及客隊得分。
     - 特徵：每隊最近 N 場勝率、得分及失分平均。
