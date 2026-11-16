@@ -17,7 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-st.set_page_config(page_title='NBA AI V6.0 ULTRA', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V6.2 ULTRA ODDS', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 @st.cache_data(ttl=300, show_spinner=False)
@@ -68,7 +68,10 @@ def simulate(hp,ap,residuals,seed):
     return draws
 
 def cloud_config():
-    try: return str(st.secrets['SUPABASE_URL']).rstrip('/'),str(st.secrets['SUPABASE_SERVICE_KEY'])
+    try:
+        url=os.environ.get('SUPABASE_URL') or st.secrets['SUPABASE_URL']
+        key=os.environ.get('SUPABASE_SERVICE_KEY') or st.secrets['SUPABASE_SERVICE_KEY']
+        return str(url).rstrip('/'),str(key)
     except Exception: return None
 
 def cloud_request(method, **kwargs):
@@ -80,7 +83,7 @@ def cloud_request(method, **kwargs):
 
 def ledger(game, ts, p, hp, ap):
     captured=datetime.now(HK)
-    if captured>=ts: return
+    if captured>=ts or final(game) or game.get('postponed'): return
     row=dict(id=int(game['id']),tip=ts.isoformat(),captured=captured.isoformat(),home=name(game['home_team']),away=name(game['visitor_team']),probability=float(p),hp=float(hp),ap=float(ap))
     if cloud_config(): cloud_request('POST',json=row,params={'on_conflict':'id'}); return
     with sqlite3.connect(os.environ.get('NBA_LEDGER','nba_predictions.sqlite'),timeout=10) as db:
@@ -96,7 +99,7 @@ def ledger_results(rows):
             if len(page)<500: break
         pending={r['id'] for r in records if r.get('actual') is None}
         for g in rows:
-            if g['id'] in pending and final(g) and g.get('home_team_score') and g.get('visitor_team_score'):
+            if g.get('id') in pending and final(g) and g.get('home_team_score') and g.get('visitor_team_score'):
                 actual=int(g['home_team_score']>g['visitor_team_score']); cloud_request('PATCH',params={'id':'eq.'+str(g['id'])},json={'actual':actual})
                 for r in records:
                     if r['id']==g['id']: r['actual']=actual; break
@@ -193,8 +196,39 @@ def official_report(season):
     ts,link=max(candidates); r=requests.get(link,headers=headers,timeout=30); r.raise_for_status()
     return parse_report(r.content),ts.astimezone(HK),link,datetime.now(HK)
 
-st.markdown("""<style>.stApp {background:#101827;color:#e5e7eb} [data-testid=stHeader]{background:#101827} [data-testid=stSidebar]{background:#172235} [data-testid=stMetricValue],h1,h2,h3,p,label{color:#e5e7eb !important}</style>""",unsafe_allow_html=True)
-st.title('🏀 NBA AI Prediction Platform V6.0 ULTRA')
+def background_job():
+    key=os.environ['BDL_API_KEY']
+    if not cloud_config(): raise RuntimeError('Cloud credentials required')
+    now=datetime.now(HK); day=now.date(); season=day.year if day.month>=9 else day.year-1
+    games,_=fetch(key,'games',tuple(('dates[]',(day+timedelta(days=i)).isoformat()) for i in range(-3,3)))
+    ledger_results(games)
+    # Explicitly fetch older pending games, including postponed games.
+    records=ledger_results([])
+    pending=records[records.actual.isna()]
+    for gid in pending.id.tolist():
+        try:
+            g=requests.get(BASE+'games/'+str(int(gid)),headers={'Authorization':key},timeout=30)
+            if g.status_code==429: break
+            if g.ok: ledger_results([g.json().get('data',{})])
+        except (requests.RequestException,ValueError): continue
+    upcoming=[g for g in games if not pd.isna(stamp(g)) and now<stamp(g)<=now+timedelta(hours=30) and not final(g) and not g.get('postponed') and g['id'] not in set(records.id)]
+    if upcoming:
+        rows,_=history(key,season); model=train(rows); c,reg,hist,*_=model
+        for g in upcoming:
+            ts=stamp(g).tz_convert(HK); gd=ts.tz_convert(ET).date()
+            x=features(hist,g['home_team']['id'],g['visitor_team']['id'],gd)
+            if x is None or not 0<=(gd-model[6]).days<=14: continue
+            prob=float(c.predict_proba([x])[0,1]); hp,ap=reg.predict([x])[0]
+            ledger(g,ts,prob,hp,ap)
+    print('Scheduled run completed; cloud ledger checked.')
+
+if os.environ.get('NBA_WORKER'):
+    background_job()
+    raise SystemExit(0)
+
+# Use Streamlit native theme rather than conflicting global CSS.
+
+st.title('🏀 NBA AI Prediction Platform V6.2 ULTRA ODDS')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 try: saved=st.secrets.get('BDL_API_KEY','')
 except Exception: saved=''
@@ -214,7 +248,7 @@ def dashboard():
         games=sorted([g for g in games if not pd.isna(stamp(g)) and stamp(g).tz_convert(HK).date()==day],key=stamp)
     except Exception as e: st.error(f'賽程讀取失敗：{e}'); return
     st.caption('賽程讀取時間：'+updated)
-    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄'])
+    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','DB 體育賠率比較'])
     injuries=[]; injury_ok=False; injury_error=''; injury_time=None; injury_url=''; read_time=None
     if games:
         try: injuries,injury_time,injury_url,read_time=official_report(season); injury_ok=True
@@ -333,11 +367,17 @@ def dashboard():
             st.dataframe(pd.DataFrame(ranking).sort_values('Elo',ascending=False),hide_index=True,width='stretch')
             st.caption('Elo 初始1500、K=20、主場優勢65；設定未獨立調優。')
     with tabs[5]:
+        st.caption('雲端模式：排程需另啟用。匯入請使用自己先前匯出的原始 CSV。' if cloud_config() else '尚未設定雲端，請先備份 CSV。')
+        # Import is deliberately disabled on public UI; use owner-only migration workflow.
         try:
-            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log,hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('雲端資料庫已設定' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
+            log=ledger_results(rows if model else games); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log.rename(columns={'id':'賽事編號','tip':'開賽時間','captured':'預測時間','home':'主隊','away':'客隊','probability':'主隊勝率','hp':'主隊預測分','ap':'客隊預測分','actual':'主隊實際勝出'}),hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('雲端資料庫已設定' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
             for col,n in zip(cc,[7,30,None]):
                 subset=done if n is None else done[dates>=pd.Timestamp(now)-pd.Timedelta(days=n)]
                 col.metric(('全部' if n is None else f'近 {n} 天')+'命中率',f'{((subset.probability>=.5)==subset.actual.astype(bool)).mean():.1%}' if len(subset) else '尚無',f'{len(subset)} 場',delta_color='off')
         except Exception as e: st.warning(str(e))
+
+    with tabs[6]:
+        from db_odds import render
+        render(games, model, now, name, stamp, features, ET, HK)
 
 dashboard()
