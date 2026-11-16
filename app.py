@@ -283,7 +283,7 @@ def dashboard():
         games=sorted([g for g in games if not pd.isna(stamp(g)) and stamp(g).tz_convert(HK).date()==day],key=stamp)
     except Exception as e: st.error(f'賽程讀取失敗：{e}'); return
     st.caption('賽程讀取時間：'+updated)
-    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','DB 體育賠率比較'])
+    tabs=st.tabs(['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','Pinnacle 賠率查詢與比較'])
     injuries=[]; injury_ok=False; injury_error=''; injury_time=None; injury_url=''; read_time=None
     if games:
         try: injuries,injury_time,injury_url,read_time=official_report(season); injury_ok=True
@@ -349,7 +349,7 @@ def dashboard():
                             st.caption('以歷史測試比分殘差成對抽樣；非保證覆蓋率，模擬勝率獨立於分類模型。')
                         st.markdown('**AI 讓分勝率**')
                         saved=[]
-                        for row in st.session_state.get('db_rows',[]):
+                        for row in st.session_state.get('pinnacle_rows',[]):
                             try:
                                 captured=pd.to_datetime(row['匯入時間'],utc=True)
                                 line=float(row['主隊讓分'])
@@ -363,9 +363,9 @@ def dashboard():
                             cc=st.columns(2)
                             cc[0].metric(f'{name(h)} ({line:+g})',f'{np.mean(adjusted>0):.1%}')
                             cc[1].metric(f'{name(a)} ({-line:+g})',f'{np.mean(adjusted<0):.1%}')
-                            st.caption(f'DB 截圖快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
+                            st.caption(f'Pinnacle 截圖快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
                         else:
-                            st.caption('暫無讓分資料：請於 DB 體育賠率比較核對並保存本場資料，再切換日期後切回（不要重新載入瀏覽器）。')
+                            st.caption('暫無讓分資料：請於 Pinnacle 賠率查詢與比較核對並保存本場資料，再切換日期後切回（不要重新載入瀏覽器）。')
                         with st.expander('近期戰績、主客場及休息分析',expanded=True):
                             details=[]
                             for t,loc in [(a,0),(h,1)]:
@@ -450,7 +450,7 @@ def dashboard():
         except Exception as e: st.warning(str(e))
 
     with tabs[6]:
-        from db_odds import render
+        from pinnacle_odds import render
         render(games, model, now, name, stamp, features, ET, HK)
 
 dashboard()
