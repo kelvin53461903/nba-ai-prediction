@@ -11,13 +11,14 @@ from collections import defaultdict
 import sqlite3, os
 from sklearn.ensemble import VotingClassifier, VotingRegressor
 from sklearn.base import clone
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.0 ULTIMATE', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.2 LITE SPREAD', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 @st.cache_data(ttl=300, show_spinner=False)
@@ -56,7 +57,12 @@ def features(hist,h,a,day):
             ar=np.array([r[1:4] for r in subset]); result.extend(ar.mean(axis=0))
         gap=(day-records[-1][0]).days
         result.extend([min(10,max(0,gap-1)),int(gap==1)])
-    result.extend([elo_rating(hist[h]),elo_rating(hist[a])])
+        recent=np.array([r[1:4] for r in records[-20:]],dtype=float)
+        w=np.exp(-np.arange(len(recent)-1,-1,-1)/6)
+        result.extend(np.average(recent,axis=0,weights=w))
+        margin=recent[:,0]-recent[:,1]
+        result.extend([margin.mean(),margin.std(),recent[:,0].std(),recent[:,1].std(),sum(0<(day-r[0]).days<=7 for r in records[-15:])])
+    result.extend([elo_rating(hist[h]),elo_rating(hist[a]),elo_rating(hist[h])-elo_rating(hist[a])])
     return result
 
 def elo_rating(records):
@@ -135,6 +141,9 @@ def train(rows):
     X=np.array(X); Y=np.array(Y); boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days); valday=days[int(len(X)*.65)]; val=sum(d<valday for d in days)
     classifiers={'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(max_iter=500)), 'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=8,min_samples_leaf=12,n_jobs=1,random_state=42)}
     regressors={'Ridge':make_pipeline(StandardScaler(),Ridge(alpha=10)), 'Random Forest':RandomForestRegressor(n_estimators=80,max_depth=9,min_samples_leaf=10,n_jobs=1,random_state=42)}
+    classifiers['HistGradientBoosting']=HistGradientBoostingClassifier(max_iter=100,max_leaf_nodes=15,l2_regularization=2,random_state=42)
+    classifiers['Logistic L2 強正則']=make_pipeline(StandardScaler(),LogisticRegression(C=.1,max_iter=500))
+    regressors['HistGradientBoosting']=MultiOutputRegressor(HistGradientBoostingRegressor(max_iter=100,max_leaf_nodes=15,l2_regularization=5,random_state=42))
     classifiers["融合模型"]=VotingClassifier([(str(i),clone(m)) for i,m in enumerate(classifiers.values())],voting="soft")
     metrics=[]
     for n,m in classifiers.items():
@@ -146,6 +155,9 @@ def train(rows):
     c=classifiers[cn].fit(X[:split],Y[:split,0]); reg=regressors[rn].fit(X[:split],Y[:split,1:])
     pp=c.predict_proba(X[split:])[:,1]; ss=reg.predict(X[split:]); actual=Y[split:,0]
     audit=pd.DataFrame({"日期":days[split:],"主隊預測勝率":pp,"主隊實際勝出":actual,"預測正確":(pp>=.5)==actual})
+    audit['預測主客分差']=ss[:,0]-ss[:,1]
+    audit['實際主客分差']=Y[split:,1]-Y[split:,2]
+    audit['分差絕對誤差']=(audit['預測主客分差']-audit['實際主客分差']).abs()
     report=(accuracy_score(actual,pp>=.5),brier_score_loss(actual,pp),mean_absolute_error(Y[split:,1],ss[:,0]),mean_absolute_error(Y[split:,2],ss[:,1]),audit)
     residuals=Y[split:,1:]-ss
     c.fit(X,Y[:,0]); reg.fit(X,Y[:,1:])
@@ -228,7 +240,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.0 ULTIMATE')
+st.title('🏀 NBA AI Prediction Platform V7.2 LITE SPREAD')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -311,6 +323,25 @@ def dashboard():
                             st.write(f'預測總分：{hp+ap:.1f}；80% 模擬區間 {tl:.0f}–{th:.0f}；模擬主勝率 {mc:.1%}')
                             counts,edges=np.histogram(total,bins=20); st.bar_chart(pd.DataFrame({"總分":edges[:-1].astype(int),"次數":counts}).set_index("總分"))
                             st.caption('以歷史測試比分殘差成對抽樣；非保證覆蓋率，模擬勝率獨立於分類模型。')
+                        st.markdown('**AI 讓分勝率**')
+                        saved=[]
+                        for row in st.session_state.get('db_rows',[]):
+                            try:
+                                captured=pd.to_datetime(row['匯入時間'],utc=True)
+                                line=float(row['主隊讓分'])
+                                if str(row['賽事ID'])==str(g['id']) and np.isfinite(line) and captured<=pd.Timestamp(now) and captured<ts:
+                                    saved.append((captured,line))
+                            except (ValueError,TypeError,KeyError,OverflowError):
+                                continue
+                        if saved:
+                            captured,line=max(saved,key=lambda v:v[0])
+                            adjusted=draws[:,0]-draws[:,1]+line
+                            cc=st.columns(2)
+                            cc[0].metric(f'{name(h)} ({line:+g})',f'{np.mean(adjusted>0):.1%}')
+                            cc[1].metric(f'{name(a)} ({-line:+g})',f'{np.mean(adjusted<0):.1%}')
+                            st.caption(f'DB 截圖快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
+                        else:
+                            st.caption('暫無讓分資料：請於 DB 體育賠率比較核對並保存本場資料，再切換日期後切回（不要重新載入瀏覽器）。')
                         with st.expander('近期戰績、主客場及休息分析',expanded=True):
                             details=[]
                             for t,loc in [(a,0),(h,1)]:
@@ -357,7 +388,10 @@ def dashboard():
         q=st.text_input('球員英文名稱')
         if q.strip():
             try:
-                players,_=fetch(key,'players',(('search',q.strip()),)); st.dataframe([{'球員':p.get('first_name','')+' '+p.get('last_name',''),'球隊':name(p.get('team') or {}),'位置':p.get('position')} for p in players],width='stretch')
+                players,_=fetch(key,'players',(('search',q.strip()),))
+                if not players and ' ' in q.strip():
+                    players,_=fetch(key,'players',(('search',q.strip().split()[-1]),)); players=[p for p in players if q.strip().casefold() in (p.get('first_name','')+' '+p.get('last_name','')).casefold()]
+                st.dataframe([{'球員':p.get('first_name','')+' '+p.get('last_name',''),'球隊':name(p.get('team') or {}),'位置':p.get('position')} for p in players],width='stretch')
             except Exception as e: st.warning(str(e))
     with tabs[3]:
         if model:
@@ -366,10 +400,15 @@ def dashboard():
             acc,brier,hmae,amae,audit=model[10]
             st.subheader('獨立歷史測試（最後約 20%）')
             c1,c2,c3=st.columns(3); c1.metric('勝方準確率',f'{acc:.1%}'); c2.metric('Brier',f'{brier:.3f}'); c3.metric('比分 MAE',f'{hmae:.1f} / {amae:.1f}')
+            st.write(f'獨立測試場數：{len(audit)}｜主隊全選基準：{audit["主隊實際勝出"].mean():.1%}')
+            cal=audit.copy(); cal['機率區間']=pd.cut(cal['主隊預測勝率'],bins=np.linspace(0,1,11),include_lowest=True).astype(str)
+            st.metric('獨立測試分差 MAE',f'{audit["分差絕對誤差"].mean():.2f} 分')
+            st.subheader('勝率校準診斷')
+            st.dataframe(cal.groupby('機率區間').agg(場數=('主隊實際勝出','size'),平均預測=('主隊預測勝率','mean'),實際主勝率=('主隊實際勝出','mean')).reset_index(),hide_index=True)
             st.line_chart(audit.assign(累積準確率=audit['預測正確'].expanding().mean()).reset_index(drop=True)['累積準確率'])
             st.download_button('下載歷史回測結果',audit.to_csv(index=False).encode('utf-8-sig'),'backtest.csv','text/csv')
             st.caption('前約65%訓練、15%選模、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
-        st.caption('模型使用近期 5、10 場得失分、勝率、主客場戰績及休息日。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
+        st.caption('模型使用近期 5、10 場得失分、勝率、主客場戰績、休息日、近20場時間加權表現、分差波動及近7日賽程密度。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
     with tabs[4]:
         if model:
             teams={t['id']:name(t) for g in rows for t in (g['home_team'],g['visitor_team'])}
