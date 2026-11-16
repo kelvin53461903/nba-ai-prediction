@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.5 SPEED & CLOUD FIX', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.6 API OPTIMIZATION PRO', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -34,31 +34,17 @@ def show_team_logo(column, team):
             st.caption("🏀 NBA")
         st.caption(name(team))
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch(key, endpoint, pairs):
-    rows=[]; cursor=None; seen=set()
-    deadline=time.monotonic()+ (900 if os.environ.get('NBA_WORKER') else 90)
-    for _ in range(250):
-        if time.monotonic()>=deadline: raise ValueError('API 讀取逾時；請稍後重試。')
-        params=list(pairs)+[('per_page',100)]
-        if cursor is not None: params.append(('cursor',cursor))
-        for attempt in range(4):
-            r=requests.get(BASE+endpoint,params=params,headers={'Authorization':key},timeout=30)
-            if r.status_code!=429: break
-            if attempt<3 and os.environ.get('NBA_WORKER'): time.sleep(65)
-            else: break
-        if r.status_code in (401,403): raise ValueError('API Key 無效或方案未授權此功能。')
-        if r.status_code==429: raise ValueError('API 次數限制，請稍後再試。')
-        if not r.ok: raise ValueError(f'API 錯誤 HTTP {r.status_code}')
-        obj=r.json(); rows.extend(obj['data']); cursor=obj.get('meta',{}).get('next_cursor')
-        if cursor is None: return rows, datetime.now(HK).isoformat(timespec='seconds')
-        if cursor in seen: raise ValueError('API 分頁異常')
-        seen.add(cursor)
-    raise ValueError('API 分頁未完整，未使用不完整資料')
+from api_cache import fetch_cached, RateLimited
 
-@st.cache_data(ttl=21600, show_spinner=False)
+def fetch(key, endpoint, pairs):
+    return fetch_cached(key, BASE, endpoint, pairs, worker=bool(os.environ.get('NBA_WORKER')))
+
 def history(key, season):
-    return fetch(key,'games',tuple(('seasons[]',s) for s in range(season-2,season+1)))
+    rows=[]; times=[]
+    for y in range(season-2,season+1):
+        part, updated=fetch_cached(key,BASE,'games',(('seasons[]',y),),worker=bool(os.environ.get('NBA_WORKER')),ttl=21600 if y==season else 2592000)
+        rows.extend(part); times.append(updated)
+    return rows,min(times)
 
 def stamp(g): return pd.to_datetime(g.get('datetime'),utc=True,errors='coerce')
 def name(t): return t.get('full_name',t.get('abbreviation','?'))
@@ -231,16 +217,14 @@ def background_job():
     if not cloud_config(): raise RuntimeError('Cloud credentials required')
     now=datetime.now(HK); day=now.date(); season=day.year if day.month>=9 else day.year-1
     games,_=fetch(key,'games',tuple(('dates[]',(day+timedelta(days=i)).isoformat()) for i in range(-3,3)))
-    ledger_results(games)
+    records=ledger_results(games)
     # Explicitly fetch older pending games, including postponed games.
-    records=ledger_results([])
-    pending=records[records.actual.isna()]
+    pending=records[records.actual.isna() & (pd.to_datetime(records.tip,utc=True,errors='coerce') < pd.Timestamp(now)-pd.Timedelta(hours=4))]
+    known={g.get('id') for g in games}
     for gid in pending.id.tolist():
-        try:
-            g=requests.get(BASE+'games/'+str(int(gid)),headers={'Authorization':key},timeout=30)
-            if g.status_code==429: break
-            if g.ok: ledger_results([g.json().get('data',{})])
-        except (requests.RequestException,ValueError): continue
+        if gid in known: continue
+        detail,_=fetch_cached(key,BASE,'games/'+str(int(gid)),(),worker=True,ttl=600)
+        ledger_results(detail)
     upcoming=[g for g in games if not pd.isna(stamp(g)) and now<stamp(g)<=now+timedelta(hours=30) and not final(g) and not g.get('postponed') and g['id'] not in set(records.id)]
     if upcoming:
         rows,_=history(key,season); model=train(rows); c,reg,hist,*_=model
@@ -258,7 +242,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.5 SPEED & CLOUD FIX')
+st.title('🏀 NBA AI Prediction Platform V7.6 API OPTIMIZATION PRO')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -275,7 +259,7 @@ with st.sidebar:
     if saved: st.success('已自動載入 API Key')
     else: st.caption('可在 Streamlit Secrets 設定 BDL_API_KEY，免重複輸入。')
     auto=st.checkbox('每 10 分鐘更新畫面',True)
-    if st.button('立即重新讀取賽程'): fetch.clear(); official_report.clear()
+    st.caption('賽程快取每 10 分鐘更新；限流時保留上次資料。')
     st.markdown('[API 申請](https://app.balldontlie.io/)')
 
 
@@ -299,11 +283,14 @@ def dashboard():
         render_ledger(now); return
     if not key: st.info('請設定 BALLDONTLIE API Key。'); return
     day=st.date_input('比賽日期（香港時間）',today)
+    games=[]; updated=''
     try:
-        games,updated=fetch(key,'games',tuple(('dates[]',d.isoformat()) for d in [day-timedelta(days=1),day,day+timedelta(days=1)]))
+        if page in (labels[0],labels[1],labels[6]): games,updated=fetch(key,'games',tuple(('dates[]',d.isoformat()) for d in [day-timedelta(days=1),day,day+timedelta(days=1)]))
         games=sorted([g for g in games if not pd.isna(stamp(g)) and stamp(g).tz_convert(HK).date()==day],key=stamp)
     except Exception as e: st.error(f'賽程讀取失敗：{e}'); return
-    st.caption('賽程讀取時間：'+updated)
+    if updated:
+        st.caption('賽程資料取得時間：'+updated)
+        if now-pd.Timestamp(updated)>pd.Timedelta(minutes=10): st.warning('目前顯示快取賽程，並非即時資料。')
     injuries=[]; injury_ok=False; injury_error=''; injury_time=None; injury_url=''; read_time=None
     if games and page in (labels[0],labels[1]):
         try: injuries,injury_time,injury_url,read_time=official_report(season); injury_ok=True
