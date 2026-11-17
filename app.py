@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.6 API OPTIMIZATION PRO', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7 ACCURACY BOOST PRO', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -121,6 +121,18 @@ def ledger_results(rows):
                 db.execute('UPDATE predictions SET actual=? WHERE id=?',(int(g['home_team_score']>g['visitor_team_score']),g['id']))
         return pd.read_sql_query('SELECT * FROM predictions ORDER BY tip DESC',db)
 
+class ProbabilityAdjustedModel:
+    """A fitted classifier with a conservative validation-chosen probability shrink."""
+    def __init__(self, base, shrink=1.0):
+        self.base = base
+        self.shrink = float(shrink)
+
+    def predict_proba(self, X):
+        raw = self.base.predict_proba(X)
+        p = np.clip(0.5 + self.shrink * (raw[:, 1] - 0.5), 0.001, 0.999)
+        return np.column_stack((1-p, p))
+
+
 @st.cache_resource(show_spinner=False,max_entries=4)
 def train(rows):
     clean=[]; seen=set()
@@ -138,11 +150,18 @@ def train(rows):
         for _,h,a,hp,ap in batch:
             x=features(hist,h,a,day)
             if x is not None: X.append(x); Y.append([int(hp>ap),hp,ap]); days.append(day)
+        # Same-day games use a frozen pre-day Elo snapshot; no intra-day leakage.
+        pre_day_elo = {tid: elo_rating(rec) for tid,rec in hist.items()}
         for _,h,a,hp,ap in batch:
-            eh,ea=elo_rating(hist[h]),elo_rating(hist[a]); expected=1/(1+10**((ea-eh-65)/400)); change=20*(int(hp>ap)-expected)
+            eh,ea=pre_day_elo.get(h,1500.0),pre_day_elo.get(a,1500.0)
+            expected=1/(1+10**((ea-eh-65)/400)); change=20*(int(hp>ap)-expected)
             hist[h].append((day,hp,ap,int(hp>ap),1,eh+change)); hist[a].append((day,ap,hp,int(ap>hp),0,ea-change))
     if len(X)<200: raise ValueError('有效歷史樣本不足 200 場')
-    X=np.array(X); Y=np.array(Y); boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days); valday=days[int(len(X)*.65)]; val=sum(d<valday for d in days)
+    X=np.array(X); Y=np.array(Y)
+    boundary=days[int(len(X)*.8)]; split=sum(d<boundary for d in days)
+    valday=days[int(len(X)*.65)]; val=sum(d<valday for d in days)
+    if val < 100 or split-val < 30 or len(X)-split < 30:
+        raise ValueError('時間切分後樣本不足，暫不顯示不可靠的回測')
     classifiers={'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(max_iter=500)), 'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=8,min_samples_leaf=12,n_jobs=1,random_state=42)}
     regressors={'Ridge':make_pipeline(StandardScaler(),Ridge(alpha=10)), 'Random Forest':RandomForestRegressor(n_estimators=80,max_depth=9,min_samples_leaf=10,n_jobs=1,random_state=42)}
     classifiers['HistGradientBoosting']=HistGradientBoostingClassifier(max_iter=100,max_leaf_nodes=15,l2_regularization=2,random_state=42)
@@ -150,13 +169,21 @@ def train(rows):
     regressors['HistGradientBoosting']=MultiOutputRegressor(HistGradientBoostingRegressor(max_iter=100,max_leaf_nodes=15,l2_regularization=5,random_state=42))
     classifiers["融合模型"]=VotingClassifier([(str(i),clone(m)) for i,m in enumerate(classifiers.values())],voting="soft")
     metrics=[]
+    calibration={}
+    # Choose the model and conservative calibration on the validation window only.
+    # Never tune against the final chronological test window.
     for n,m in classifiers.items():
-        m.fit(X[:val],Y[:val,0]); p=m.predict_proba(X[val:split])[:,1]; metrics.append({'模型':n,'準確率':accuracy_score(Y[val:split,0],p>=.5),'Brier':brier_score_loss(Y[val:split,0],p)})
+        m.fit(X[:val],Y[:val,0]); raw=m.predict_proba(X[val:split])[:,1]
+        options=[(brier_score_loss(Y[val:split,0],np.clip(.5+k*(raw-.5),.001,.999)),k) for k in (0.65,0.8,1.0)]
+        best_brier,shrink=min(options)
+        calibration[n]=shrink
+        metrics.append({'模型':n,'準確率':accuracy_score(Y[val:split,0],raw>=.5),'Brier':best_brier,'勝率縮放':shrink})
     scores=[]
     for n,m in regressors.items():
         m.fit(X[:val],Y[:val,1:]); p=m.predict(X[val:split]); scores.append({'模型':n,'主隊 MAE':mean_absolute_error(Y[val:split,1],p[:,0]),'客隊 MAE':mean_absolute_error(Y[val:split,2],p[:,1])})
     cn=min(metrics,key=lambda r:r['Brier'])['模型']; rn=min(scores,key=lambda r:r['主隊 MAE']+r['客隊 MAE'])['模型']
-    c=classifiers[cn].fit(X[:split],Y[:split,0]); reg=regressors[rn].fit(X[:split],Y[:split,1:])
+    c=ProbabilityAdjustedModel(classifiers[cn].fit(X[:split],Y[:split,0]),calibration[cn])
+    reg=regressors[rn].fit(X[:split],Y[:split,1:])
     pp=c.predict_proba(X[split:])[:,1]; ss=reg.predict(X[split:]); actual=Y[split:,0]
     audit=pd.DataFrame({"日期":days[split:],"主隊預測勝率":pp,"主隊實際勝出":actual,"預測正確":(pp>=.5)==actual})
     audit['預測主客分差']=ss[:,0]-ss[:,1]
@@ -164,7 +191,7 @@ def train(rows):
     audit['分差絕對誤差']=(audit['預測主客分差']-audit['實際主客分差']).abs()
     report=(accuracy_score(actual,pp>=.5),brier_score_loss(actual,pp),mean_absolute_error(Y[split:,1],ss[:,0]),mean_absolute_error(Y[split:,2],ss[:,1]),audit)
     residuals=Y[split:,1:]-ss
-    c.fit(X,Y[:,0]); reg.fit(X,Y[:,1:])
+    c.base.fit(X,Y[:,0]); reg.fit(X,Y[:,1:])
     return c,reg,hist,metrics,scores,len(X),clean[-1][0],cn,rn,boundary,report,residuals
 
 ET=ZoneInfo('America/New_York')
@@ -242,7 +269,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.6 API OPTIMIZATION PRO')
+st.title('🏀 NBA AI Prediction Platform V7.7 ACCURACY BOOST PRO')
 st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -438,14 +465,16 @@ def dashboard():
             acc,brier,hmae,amae,audit=model[10]
             st.subheader('獨立歷史測試（最後約 20%）')
             c1,c2,c3=st.columns(3); c1.metric('勝方準確率',f'{acc:.1%}'); c2.metric('Brier',f'{brier:.3f}'); c3.metric('比分 MAE',f'{hmae:.1f} / {amae:.1f}')
-            st.write(f'獨立測試場數：{len(audit)}｜主隊全選基準：{audit["主隊實際勝出"].mean():.1%}')
+            baseline=max(audit['主隊實際勝出'].mean(),1-audit['主隊實際勝出'].mean())
+            st.write(f'獨立測試場數：{len(audit)}｜主隊全選基準：{audit["主隊實際勝出"].mean():.1%}｜較佳固定選邊基準：{baseline:.1%}')
+            st.caption('勝率縮放只在驗證集選擇，獨立測試集不參與調參。是否真正改善需與相同測試日期的 V7.6 比較。')
             cal=audit.copy(); cal['機率區間']=pd.cut(cal['主隊預測勝率'],bins=np.linspace(0,1,11),include_lowest=True).astype(str)
             st.metric('獨立測試分差 MAE',f'{audit["分差絕對誤差"].mean():.2f} 分')
             st.subheader('勝率校準診斷')
             st.dataframe(cal.groupby('機率區間').agg(場數=('主隊實際勝出','size'),平均預測=('主隊預測勝率','mean'),實際主勝率=('主隊實際勝出','mean')).reset_index(),hide_index=True)
             st.line_chart(audit.assign(累積準確率=audit['預測正確'].expanding().mean()).reset_index(drop=True)['累積準確率'])
             st.download_button('下載歷史回測結果',audit.to_csv(index=False).encode('utf-8-sig'),'backtest.csv','text/csv')
-            st.caption('前約65%訓練、15%選模、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
+            st.caption('前約65%訓練、15%選模與勝率縮放、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
         st.caption('模型使用近期 5、10 場得失分、勝率、主客場戰績、休息日、近20場時間加權表現、分差波動及近7日賽程密度。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
     if page==labels[4]:
         if model:
