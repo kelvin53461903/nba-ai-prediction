@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7.3 STABILITY FIX', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.8 AUTO ODDS API', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -346,7 +346,7 @@ def render_ledger(now):
 @st.fragment(run_every=600 if auto else None)
 def dashboard():
     now=datetime.now(HK); today=now.date(); season=today.year if today.month>=9 else today.year-1
-    labels=['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','Pinnacle 賠率查詢與比較']
+    labels=['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','公開賠率 API 比較']
     page=st.radio('功能選擇',labels,index=5,horizontal=True,label_visibility='collapsed')
     if page==labels[5]:
         render_ledger(now); return
@@ -387,6 +387,8 @@ def dashboard():
         except Exception as e: error=str(e)
         if error and page!=labels[0]: st.warning('模型暫不可用：'+error)
     from cloud_accuracy import load, settle, probabilities
+    from odds_api import load_snapshot, match_event, best_market, home_spread
+    public_odds=load_snapshot() if page in (labels[0],labels[6]) else None
     cloud_odds=[]
     # The daily prediction page also needs saved Pinnacle spreads.
     # Only the odds page performs settlement; daily predictions read snapshots only.
@@ -452,23 +454,34 @@ def dashboard():
                             st.caption('以歷史測試比分殘差成對抽樣；非保證覆蓋率，模擬勝率獨立於分類模型。')
                         st.markdown('**AI 讓分勝率**')
                         saved=[]
+                        if public_odds:
+                            event=match_event(g,public_odds['events'])
+                            if event:
+                                bookmaker,markets=best_market(event)
+                                if markets:
+                                    line=home_spread(markets['spreads'],name(h))
+                                    try:
+                                        captured=pd.Timestamp(public_odds['retrieved_at_utc'])
+                                        if line is not None and captured<ts and captured<=pd.Timestamp(now):
+                                            saved.append((captured,float(line),'The Odds API / '+str(bookmaker.get('title','?'))))
+                                    except (ValueError,TypeError,KeyError): pass
                         for row in ([{'匯入時間':r['captured'],'主隊讓分':r['home_spread'],'賽事ID':r['game_id']} for r in cloud_odds]+st.session_state.get('pinnacle_rows',[])):
                             try:
                                 captured=pd.to_datetime(row['匯入時間'],utc=True)
                                 line=float(row['主隊讓分'])
                                 if str(row['賽事ID'])==str(g['id']) and np.isfinite(line) and captured<=pd.Timestamp(now) and captured<ts:
-                                    saved.append((captured,line))
+                                    saved.append((captured,line,'Pinnacle historical'))
                             except (ValueError,TypeError,KeyError,OverflowError):
                                 continue
                         if saved:
-                            captured,line=max(saved,key=lambda v:v[0])
+                            captured,line,source=max(saved,key=lambda v:v[0])
                             adjusted=draws[:,0]-draws[:,1]+line
                             cc=st.columns(2)
                             cc[0].metric(f'{name(h)} ({line:+g})',f'{np.mean(adjusted>0):.1%}')
                             cc[1].metric(f'{name(a)} ({-line:+g})',f'{np.mean(adjusted<0):.1%}')
-                            st.caption(f'Pinnacle 截圖快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
+                            st.caption(f'{source} 賠率快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
                         else:
-                            st.caption('暫無讓分資料：請於 Pinnacle 賠率查詢與比較核對並保存本場資料，再切換日期後切回（雲端模式可重新載入）。')
+                            st.caption('暫無已配對的賽前讓分資料；請檢查公開賠率 API 比較頁及最近一次 GitHub Actions 更新。')
                         with st.expander('近期戰績、主客場及休息分析',expanded=True):
                             details=[]
                             for t,loc in [(a,0),(h,1)]:
@@ -545,7 +558,7 @@ def dashboard():
             st.dataframe(pd.DataFrame(ranking).sort_values('Elo',ascending=False),hide_index=True,width='stretch')
             st.caption('Elo 初始1500、K=20、主場優勢65；設定未獨立調優。')
     if page==labels[6]:
-        from pinnacle_odds import render
-        render(games, model, now, name, stamp, features, ET, HK, cloud_config(), cloud_odds, simulate, final)
+        from odds_api import render
+        render(games, public_odds, HK)
 
 dashboard()
