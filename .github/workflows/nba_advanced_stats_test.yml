@@ -1,0 +1,61 @@
+name: NBA V7.9 Advanced Stats Manual Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'NBA season (YYYY-YY)'
+        required: true
+        default: '2025-26'
+        type: choice
+        options:
+          - '2024-25'
+          - '2025-26'
+          - '2026-27'
+      cutoff:
+        description: 'Historical cutoff YYYY-MM-DD (must be within season; use 2026-04-01 for first test)'
+        required: true
+        default: '2026-04-01'
+        type: string
+      fetch:
+        description: 'Actually request NBA Stats? Keep false for first dry run.'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  test-advanced-stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify collector exists
+        run: test -f collect_advanced_stats.py
+      - name: Check Python syntax
+        run: python -m py_compile collect_advanced_stats.py
+      - name: Run isolated collector
+        env:
+          TEST_SEASON: ${{ inputs.season }}
+          TEST_CUTOFF: ${{ inputs.cutoff }}
+          TEST_FETCH: ${{ inputs.fetch }}
+        shell: bash
+        run: |
+          args=(--season "$TEST_SEASON" --cutoff "$TEST_CUTOFF" --out /tmp/nba-v79-advanced-stats --timeout 25)
+          if [[ "$TEST_FETCH" == "true" ]]; then args+=(--fetch); fi
+          python collect_advanced_stats.py "${args[@]}"
+      - name: Upload CSV artifact (only when data was actually fetched)
+        if: ${{ inputs.fetch == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-v79-advanced-stats-${{ inputs.season }}
+          path: /tmp/nba-v79-advanced-stats/*.csv
+          if-no-files-found: error
+          retention-days: 14
