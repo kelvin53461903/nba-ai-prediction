@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7.1 CACHE FIX', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7.2 SCORE DISPLAY FIX', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -311,7 +311,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.7.1 CACHE FIX')
+st.title('🏀 NBA AI Prediction Platform V7.7.2 SCORE DISPLAY FIX')
 st.caption('香港時間｜GitHub Actions 共用歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -399,11 +399,25 @@ def dashboard():
             h=g['home_team']; a=g['visitor_team']; ts=stamp(g).tz_convert(HK)
             with st.container(border=True):
                 st.caption(f'{ts:%Y-%m-%d %H:%M} HKT · {g.get("status", "未知")}')
-                st.subheader(f'{name(a)} @ {name(h)}')
+                is_final = final(g)
+                if is_final and g.get('visitor_team_score') is not None and g.get('home_team_score') is not None:
+                    away_score = int(g['visitor_team_score'])
+                    home_score = int(g['home_team_score'])
+                    st.subheader(f'{name(a)} {away_score} @ {name(h)} {home_score}')
+                else:
+                    st.subheader(f'{name(a)} @ {name(h)}')
                 logo_left, logo_right = st.columns(2)
                 show_team_logo(logo_left, a)
                 show_team_logo(logo_right, h)
-                if final(g): st.write(f'完場：{g.get("visitor_team_score")} – {g.get("home_team_score")}')
+                if is_final:
+                    if g.get('visitor_team_score') is not None and g.get('home_team_score') is not None:
+                        away_result = '勝方' if away_score > home_score else ('平手' if away_score == home_score else '落敗')
+                        home_result = '勝方' if home_score > away_score else ('平手' if home_score == away_score else '落敗')
+                        score_left, score_right = st.columns(2)
+                        score_left.metric(f'客隊 · {name(a)}', f'{away_score} 分', away_result, delta_color='off')
+                        score_right.metric(f'主隊 · {name(h)}', f'{home_score} 分', home_result, delta_color='off')
+                    else:
+                        st.warning('賽事已完場，但比分資料尚未完整提供。')
                 elif ts<=now or g.get('postponed'): st.write('已到開賽時間或延期；不產生賽前預測。')
                 elif model:
                     c,reg,hist,*_=model
