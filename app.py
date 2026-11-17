@@ -449,6 +449,31 @@ def dashboard():
                         right.write(f'{display_team(h)}（主隊）：{p:.1%}')
                         st.markdown(f'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden"><div style="width:{(1-p)*100:.6f}%;background:#3785ce"></div><div style="width:{p*100:.6f}%;background:#259569"></div></div>',unsafe_allow_html=True)
                         st.write('預測勝方：'+name(h if p>=.5 else a))
+                        
+                        # V7.9：AI 信心分級（實驗性）
+                        higher_win_prob = max(float(p), 1.0 - float(p))
+
+                        if higher_win_prob >= 0.75:
+                            confidence_level = '高'
+                        elif higher_win_prob >= 0.60:
+                            confidence_level = '中'
+                        else:
+                            confidence_level = '低'
+
+                        st.info(
+                            f'AI 模型信心（實驗性）：{confidence_level} | '
+                            f'較高一方原始預測勝率 {higher_win_prob:.1%}'
+                        )
+                        st.caption(
+                            '分級門檻：低 50–<60%；中 60–<75%；高 ≥75%。'
+                            '這只描述模型輸出強度，並非真實勝率、'
+                            '可靠性認證或投注風險評級。'
+                        )
+
+                        
+                
+     
+
                         try: ledger(g,ts,p,hp,ap)
                         except Exception as e: st.caption('預測紀錄未保存：'+str(e))
                         draws=simulate(hp,ap,model[11],int(g['id']))
