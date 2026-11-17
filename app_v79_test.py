@@ -121,51 +121,22 @@ def simulate(hp,ap,residuals,seed):
     draws=np.maximum(0,np.rint(np.array([hp,ap])+residuals[rng.integers(0,len(residuals),10000)]))
     return draws
 
+# V7.9 TEST isolation: this app never connects to the production prediction ledger.
+# Deliberately ignore any SUPABASE_* environment variables or Streamlit Secrets.
 def cloud_config():
-    try:
-        url=os.environ.get('SUPABASE_URL') or st.secrets['SUPABASE_URL']
-        key=os.environ.get('SUPABASE_SERVICE_KEY') or st.secrets['SUPABASE_SERVICE_KEY']
-        return str(url).strip().rstrip('/'),str(key).strip()
-    except Exception: return None
+    return None
 
 def cloud_request(method, **kwargs):
-    url,key=cloud_config()
-    headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'resolution=ignore-duplicates,return=minimal'}
-    if key.startswith('sb_secret_'): headers.pop('Authorization',None)
-    r=requests.request(method,url+'/rest/v1/nba_predictions',headers=headers,timeout=20,**kwargs)
-    if not r.ok: raise ValueError('雲端紀錄操作失敗 HTTP '+str(r.status_code))
-    return r
+    raise RuntimeError('V7.9 TEST: cloud prediction-ledger access is disabled')
 
 def ledger(game, ts, p, hp, ap):
-    captured=datetime.now(HK)
-    if captured>=ts or final(game) or game.get('postponed'): return
-    row=dict(id=int(game['id']),tip=ts.isoformat(),captured=captured.isoformat(),home=name(game['home_team']),away=name(game['visitor_team']),probability=float(p),hp=float(hp),ap=float(ap))
-    if cloud_config(): cloud_request('POST',json=row,params={'on_conflict':'id'}); return
-    with sqlite3.connect(os.environ.get('NBA_LEDGER','nba_predictions.sqlite'),timeout=10) as db:
-        db.execute('CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY, tip TEXT, captured TEXT, home TEXT, away TEXT, probability REAL, hp REAL, ap REAL, actual INTEGER)')
-        db.execute('INSERT OR IGNORE INTO predictions VALUES(?,?,?,?,?,?,?,?,NULL)',tuple(row.values()))
+    # Deliberately never save test predictions, locally or remotely.
+    return None
 
 def ledger_results(rows):
+    # Do not create, update, or read the production/local prediction ledger.
     cols=['id','tip','captured','home','away','probability','hp','ap','actual']
-    if cloud_config():
-        records=[]
-        for offset in range(0,100000,500):
-            page=cloud_request('GET',params={'select':'*','order':'id.asc','limit':500,'offset':offset}).json(); records.extend(page)
-            if len(page)<500: break
-        else: raise ValueError('雲端紀錄超過讀取上限')
-        pending={r['id'] for r in records if r.get('actual') is None}
-        for g in rows:
-            if g.get('id') in pending and final(g) and g.get('home_team_score') and g.get('visitor_team_score'):
-                actual=int(g['home_team_score']>g['visitor_team_score']); cloud_request('PATCH',params={'id':'eq.'+str(g['id'])},json={'actual':actual})
-                for r in records:
-                    if r['id']==g['id']: r['actual']=actual; break
-        return pd.DataFrame(records,columns=cols).sort_values('tip',ascending=False)
-    with sqlite3.connect(os.environ.get('NBA_LEDGER','nba_predictions.sqlite'),timeout=10) as db:
-        db.execute('CREATE TABLE IF NOT EXISTS predictions(id INTEGER PRIMARY KEY, tip TEXT, captured TEXT, home TEXT, away TEXT, probability REAL, hp REAL, ap REAL, actual INTEGER)')
-        for g in rows:
-            if final(g) and g.get('home_team_score') and g.get('visitor_team_score'):
-                db.execute('UPDATE predictions SET actual=? WHERE id=?',(int(g['home_team_score']>g['visitor_team_score']),g['id']))
-        return pd.read_sql_query('SELECT * FROM predictions ORDER BY tip DESC',db)
+    return pd.DataFrame(columns=cols)
 
 class ProbabilityAdjustedModel:
     """A fitted classifier with a conservative validation-chosen probability shrink."""
@@ -312,14 +283,12 @@ def background_job():
     print('Scheduled run completed; cloud ledger checked.')
 
 if os.environ.get('NBA_WORKER'):
-    raise SystemExit('V7.9 test interface is not a background worker')
-    background_job()
-    raise SystemExit(0)
+    raise SystemExit('V7.9 TEST is not a background worker; no database writes permitted')
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
 st.title('NBA AI Prediction Platform — V7.9 TEST')
-st.warning('獨立測試版｜AI 模型與 V7.8.2 相同｜信心分級僅為實驗性標籤，並非已校準的真實勝率或投注建議。')
+st.warning('獨立測試版｜AI 模型與 V7.8.2 相同｜預測紀錄及 Supabase 存取已停用｜信心分級僅為實驗性標籤，並非已校準的真實勝率或投注建議。')
 st.caption('香港時間｜GitHub Actions 共用歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -341,10 +310,10 @@ with st.sidebar:
 
 
 def render_ledger(now):
-    st.caption('雲端模式：排程需另啟用。匯入請使用自己先前匯出的原始 CSV。' if cloud_config() else '尚未設定雲端，請先備份 CSV。')
+    st.caption('V7.9 TEST 唯讀隔離模式：不連接正式 Supabase、不讀寫預測紀錄；此頁不會顯示正式版歷史紀錄。')
     # Import is deliberately disabled on public UI; use owner-only migration workflow.
     try:
-        log=ledger_results([]); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log.assign(tip=pd.to_datetime(log.tip,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT'),captured=pd.to_datetime(log.captured,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT')).rename(columns={'id':'賽事編號','tip':'開賽時間','captured':'預測時間','home':'主隊','away':'客隊','probability':'主隊勝率','hp':'主隊預測分','ap':'客隊預測分','actual':'主隊實際勝出'}),hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('已讀取 '+str(len(log))+' 筆紀錄'); st.caption('雲端資料庫讀取成功' if cloud_config() else '本機暫存模式：重新部署可能遺失，請匯出。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
+        log=ledger_results([]); done=log.dropna(subset=['actual']); st.metric('已結算命中率',f"{((done.probability>=.5)==done.actual.astype(bool)).mean():.1%}" if len(done) else '尚無'); st.dataframe(log.assign(tip=pd.to_datetime(log.tip,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT'),captured=pd.to_datetime(log.captured,utc=True,errors='coerce').dt.tz_convert(HK).dt.strftime('%Y-%m-%d %H:%M HKT')).rename(columns={'id':'賽事編號','tip':'開賽時間','captured':'預測時間','home':'主隊','away':'客隊','probability':'主隊勝率','hp':'主隊預測分','ap':'客隊預測分','actual':'主隊實際勝出'}),hide_index=True,width='stretch'); st.download_button('匯出預測紀錄',log.to_csv(index=False).encode('utf-8-sig'),'predictions.csv','text/csv'); st.caption('已讀取 '+str(len(log))+' 筆紀錄'); st.caption('測試版預測紀錄儲存已停用；匯出的 CSV 不包含正式版資料。'); dates=pd.to_datetime(done['tip'],utc=True,errors='coerce'); cc=st.columns(3)
         for col,n in zip(cc,[7,30,None]):
             subset=done if n is None else done[dates>=pd.Timestamp(now)-pd.Timedelta(days=n)]
             col.metric(('全部' if n is None else f'近 {n} 天')+'命中率',f'{((subset.probability>=.5)==subset.actual.astype(bool)).mean():.1%}' if len(subset) else '尚無',f'{len(subset)} 場',delta_color='off')
