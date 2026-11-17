@@ -8,7 +8,8 @@ import pdfplumber
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
-import sqlite3, os
+import sqlite3, os, gzip, json
+from pathlib import Path
 from sklearn.ensemble import VotingClassifier, VotingRegressor
 from sklearn.base import clone
 from sklearn.multioutput import MultiOutputRegressor
@@ -18,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7 ACCURACY BOOST PRO', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7.1 CACHE FIX', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -38,6 +39,45 @@ from api_cache import fetch_cached, RateLimited
 
 def fetch(key, endpoint, pairs):
     return fetch_cached(key, BASE, endpoint, pairs, worker=bool(os.environ.get('NBA_WORKER')))
+
+def shared_history(season):
+    """Public, compressed game-history snapshot produced by the scheduled worker.
+
+    Never silently treat stale current-season data as current.
+    """
+    url = (f'https://raw.githubusercontent.com/kelvin53461903/'
+           f'nba-ai-prediction/main/data/history_{season}.json.gz')
+    r = requests.get(url, timeout=25, headers={'Cache-Control': 'no-cache'})
+    if r.status_code != 200:
+        raise ValueError(f'背景歷史資料尚未發布 (HTTP {r.status_code})')
+    obj = json.loads(gzip.decompress(r.content))
+    if obj.get('season') != season or not isinstance(obj.get('games'), list):
+        raise ValueError('背景歷史資料格式或賽季不符')
+    updated = pd.Timestamp(obj['updated'])
+    age = pd.Timestamp.now(tz='UTC') - updated
+    if age < pd.Timedelta(0) or age > pd.Timedelta(hours=36):
+        raise ValueError('背景歷史資料超過 36 小時未更新')
+    if len(obj['games']) < 200:
+        raise ValueError('背景歷史資料不足，拒絕訓練')
+    return obj['games'], obj['updated']
+
+
+def publish_history_snapshot(season, rows):
+    """Worker writes public NBA game data only; never credentials or predictions."""
+    folder = Path('data')
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f'history_{season}.json.gz'
+    obj = dict(season=season,
+               updated=datetime.now(ZoneInfo('UTC')).isoformat(),
+               games=rows)
+    # gzip mtime=0 makes compression deterministic apart from the updated field.
+    payload = gzip.compress(json.dumps(obj, separators=(',', ':'),
+                                       ensure_ascii=False).encode(), mtime=0)
+    temp = target.with_suffix('.tmp')
+    temp.write_bytes(payload)
+    temp.replace(target)
+    print(f'Published history snapshot: {target} ({len(rows)} games, {len(payload)} bytes)')
+
 
 def history(key, season):
     rows=[]; times=[]
@@ -253,8 +293,10 @@ def background_job():
         detail,_=fetch_cached(key,BASE,'games/'+str(int(gid)),(),worker=True,ttl=600)
         ledger_results(detail)
     upcoming=[g for g in games if not pd.isna(stamp(g)) and now<stamp(g)<=now+timedelta(hours=30) and not final(g) and not g.get('postponed') and g['id'] not in set(records.id)]
+    rows,_=history(key,season)
+    publish_history_snapshot(season,rows)
     if upcoming:
-        rows,_=history(key,season); model=train(rows); c,reg,hist,*_=model
+        model=train(rows); c,reg,hist,*_=model
         for g in upcoming:
             ts=stamp(g).tz_convert(HK); gd=ts.tz_convert(ET).date()
             x=features(hist,g['home_team']['id'],g['visitor_team']['id'],gd)
@@ -269,8 +311,8 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.7 ACCURACY BOOST PRO')
-st.caption('香港時間｜自動歷史資料｜每日賽事預測｜傷兵風險')
+st.title('🏀 NBA AI Prediction Platform V7.7.1 CACHE FIX')
+st.caption('香港時間｜GitHub Actions 共用歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
         value=os.environ.get(field)
@@ -341,7 +383,7 @@ def dashboard():
     if page in (labels[0],labels[3],labels[4],labels[6]):
         try:
             with st.spinner('讀取歷史資料及快取模型…'):
-                rows,history_time=history(key,season); model=train(rows)
+                rows,history_time=shared_history(season); model=train(rows)
         except Exception as e: error=str(e)
         if error and page!=labels[0]: st.warning('模型暫不可用：'+error)
     from cloud_accuracy import load, settle, probabilities
@@ -350,7 +392,7 @@ def dashboard():
         try: cloud_odds=settle(cloud_config(),load(cloud_config()),(rows if model else [])+games,final)
         except Exception as e: st.warning(str(e))
     if page==labels[0]:
-        if error: st.warning('模型暫不可用：'+error)
+        if error: st.warning('模型暫不可用：'+error+'。請先確認 GitHub Actions 已完成背景歷史資料發布。')
         if model: st.caption(f'歷史資料截至 {model[6]}（美東賽事日期）；讀取時間 {history_time}；預測只使用賽前資料')
         if not games: st.info('該日期沒有已取得的賽事。')
         for g in games:
