@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7.2 SCORE DISPLAY FIX', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.7.3 STABILITY FIX', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -311,7 +311,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.7.2 SCORE DISPLAY FIX')
+st.title('🏀 NBA AI Prediction Platform V7.7.3 STABILITY FIX')
 st.caption('香港時間｜GitHub Actions 共用歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -388,9 +388,15 @@ def dashboard():
         if error and page!=labels[0]: st.warning('模型暫不可用：'+error)
     from cloud_accuracy import load, settle, probabilities
     cloud_odds=[]
-    if page==labels[6] and cloud_config():
-        try: cloud_odds=settle(cloud_config(),load(cloud_config()),(rows if model else [])+games,final)
-        except Exception as e: st.warning(str(e))
+    # The daily prediction page also needs saved Pinnacle spreads.
+    # Only the odds page performs settlement; daily predictions read snapshots only.
+    if page in (labels[0],labels[6]) and cloud_config():
+        try:
+            cloud_odds=load(cloud_config())
+            if page==labels[6]:
+                cloud_odds=settle(cloud_config(),cloud_odds,(rows if model else [])+games,final)
+        except Exception as e:
+            st.warning('Pinnacle 雲端快照讀取／結算失敗：'+str(e))
     if page==labels[0]:
         if error: st.warning('模型暫不可用：'+error+'。請先確認 GitHub Actions 已完成背景歷史資料發布。')
         if model: st.caption(f'歷史資料截至 {model[6]}（美東賽事日期）；讀取時間 {history_time}；預測只使用賽前資料')
