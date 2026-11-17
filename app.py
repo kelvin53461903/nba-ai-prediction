@@ -311,7 +311,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.7.3 STABILITY FIX')
+st.title('🏀 NBA AI Prediction Platform V7.8.1 AUTO OVER/UNDER')
 st.caption('香港時間｜GitHub Actions 共用歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -387,7 +387,7 @@ def dashboard():
         except Exception as e: error=str(e)
         if error and page!=labels[0]: st.warning('模型暫不可用：'+error)
     from cloud_accuracy import load, settle, probabilities
-    from odds_api import load_snapshot, match_event, best_market, home_spread
+    from odds_api import load_snapshot, match_event, best_market, home_spread, total_market
     public_odds=load_snapshot() if page in (labels[0],labels[6]) else None
     cloud_odds=[]
     # The daily prediction page also needs saved Pinnacle spreads.
@@ -452,6 +452,37 @@ def dashboard():
                             st.write(f'預測總分：{hp+ap:.1f}；80% 模擬區間 {tl:.0f}–{th:.0f}；模擬主勝率 {mc:.1%}')
                             counts,edges=np.histogram(total,bins=20); st.bar_chart(pd.DataFrame({"總分":edges[:-1].astype(int),"次數":counts}).set_index("總分"))
                             st.caption('以歷史測試比分殘差成對抽樣；非保證覆蓋率，模擬勝率獨立於分類模型。')
+                        st.markdown('**AI 全場大小分 Over／Under 機率**')
+                        ou_quote = None
+                        if public_odds:
+                            event_ou = match_event(g, public_odds.get('events', []))
+                            if event_ou:
+                                book_ou, markets_ou = best_market(event_ou)
+                                if markets_ou:
+                                    candidate = total_market(markets_ou.get('totals'))
+                                    try:
+                                        fetched_ou = pd.to_datetime(public_odds['retrieved_at_utc'], utc=True)
+                                        age_ou = pd.Timestamp(now) - fetched_ou
+                                        if (candidate and pd.Timedelta(0) <= age_ou <= pd.Timedelta(hours=12)
+                                                and fetched_ou < ts):
+                                            ou_quote = (candidate, fetched_ou, book_ou.get('title', '未知'))
+                                    except (KeyError, TypeError, ValueError):
+                                        pass
+                        if ou_quote:
+                            quote_ou, fetched_ou, book_title_ou = ou_quote
+                            line_ou = quote_ou['line']
+                            totals_ou = draws.sum(axis=1)
+                            over_ou = float(np.mean(totals_ou > line_ou))
+                            under_ou = float(np.mean(totals_ou < line_ou))
+                            push_ou = float(np.mean(totals_ou == line_ou))
+                            over_col, under_col = st.columns(2)
+                            over_col.metric(f'Over {line_ou:g}', f'{over_ou:.1%}')
+                            under_col.metric(f'Under {line_ou:g}', f'{under_ou:.1%}')
+                            st.write(f'AI 預測總分 {hp+ap:.1f}｜市場盤口 {line_ou:g}｜差距 {hp+ap-line_ou:+.1f} 分')
+                            st.caption(f'The Odds API / {book_title_ou}；快照 {fetched_ou.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {push_ou:.1%}。'
+                                       '機率由 10,000 次歷史測試比分殘差模擬估算，未以歷史大小分盤口校準，並非已驗證的投注勝率。')
+                        else:
+                            st.caption('暫無已配對且 12 小時內更新的賽前全場大小分盤口，故不顯示 Over／Under 機率。')
                         st.markdown('**AI 讓分勝率**')
                         saved=[]
                         if public_odds:

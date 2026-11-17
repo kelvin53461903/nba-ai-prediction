@@ -99,3 +99,21 @@ def render(games, snapshot, hk):
     if records: st.dataframe(pd.DataFrame(records),hide_index=True,width="stretch")
     else: st.info("所選日期未找到完整且可配對的賽前獨贏／讓分／大小分報價。")
     st.caption("展示同一博彩公司的一組盤口；不同博彩公司可能有不同數值。舊 Pinnacle 歷史紀錄保持獨立。")
+
+
+def total_market(market):
+    """Return a coherent two-sided full-game total line or None."""
+    import math
+    outcomes = market.get("outcomes", []) if isinstance(market, dict) else []
+    over = next((x for x in outcomes if x.get("name") == "Over"), None)
+    under = next((x for x in outcomes if x.get("name") == "Under"), None)
+    if not over or not under:
+        return None
+    try:
+        line = float(over["point"])
+        other = float(under["point"])
+        if not math.isfinite(line) or not math.isfinite(other) or line != other or line <= 0:
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {"line": line, "over_price": over.get("price"), "under_price": under.get("price")}
