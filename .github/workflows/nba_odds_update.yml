@@ -1,0 +1,37 @@
+name: NBA Odds Update
+on:
+  schedule:
+    - cron: '5 0,6,12,18 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nba-odds-update
+  cancel-in-progress: false
+jobs:
+  odds-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Fetch public NBA odds
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: python -c "from odds_api import update_snapshot; update_snapshot()"
+      - name: Commit public odds snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/odds_latest.json
+          if git diff --cached --quiet; then
+            echo "No odds changes"
+          else
+            git commit -m "Update public NBA odds snapshot"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
