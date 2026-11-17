@@ -560,8 +560,48 @@ def dashboard():
             st.subheader('勝率校準診斷')
             st.dataframe(cal.groupby('機率區間').agg(場數=('主隊實際勝出','size'),平均預測=('主隊預測勝率','mean'),實際主勝率=('主隊實際勝出','mean')).reset_index(),hide_index=True)
             st.line_chart(audit.assign(累積準確率=audit['預測正確'].expanding().mean()).reset_index(drop=True)['累積準確率'])
-            st.download_button('下載歷史回測結果',audit.to_csv(index=False).encode('utf-8-sig'),'backtest.csv','text/csv')
-            st.caption('前約65%訓練、15%選模與勝率縮放、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
+            
+        # V7.9 TEST：獨立測試集信心分級驗證
+        st.subheader('AI 信心分級歷史驗證（獨立測試集）')
+
+        conf = audit.copy()
+        conf['較高一方預測勝率'] = conf['主隊預測勝率'].apply(
+            lambda p: max(float(p), 1.0 - float(p))
+        )
+        conf['預測勝方正確'] = conf['預測正確'].astype(float)
+
+        conf['信心分級'] = pd.cut(
+            conf['較高一方預測勝率'],
+            bins=[0.5 - 1e-9, 0.6, 0.75, 1.0 + 1e-9],
+            labels=['低', '中', '高'],
+            right=False,
+            include_lowest=True
+        )
+
+        summary = (
+            conf.groupby('信心分級', observed=False)
+            .agg(
+                歷史場數=('預測勝方正確', 'count'),
+                實際命中率=('預測勝方正確', 'mean'),
+                平均預測勝率=('較高一方預測勝率', 'mean')
+            )
+            .reset_index()
+        )
+
+        summary['實際命中率'] = (
+            summary['實際命中率'] * 100
+        ).round(1)
+        summary['平均預測勝率'] = (
+            summary['平均預測勝率'] * 100
+        ).round(1)
+
+        st.dataframe(summary, hide_index=True, width='stretch')
+        st.caption(
+            '只使用最後約20%的獨立歷史測試資料。'
+            '信心分級為實驗性標籤，不代表已校準的真實勝率。'
+        )
+        st.download_button('下載歷史回測結果',audit.to_csv(index=False).encode('utf-8-sig'),'backtest.csv','text/csv')
+        st.caption('前約65%訓練、15%選模與勝率縮放、最後20%獨立測試；正式模型再以所有資料訓練。這是歷史回測，不是已保存的真實賽前預測。')
         st.caption('模型使用近期 5、10 場得失分、勝率、主客場戰績、休息日、近20場時間加權表現、分差波動及近7日賽程密度。不含歷史傷兵、陣容或盤口。資料由 BALLDONTLIE 提供；預測非投注建議。')
     if page==labels[4]:
         if model:
