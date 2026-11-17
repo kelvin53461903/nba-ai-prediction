@@ -33,7 +33,7 @@ def show_team_logo(column, team):
             st.markdown(f'<img src="https://cdn.nba.com/logos/nba/{logo_id}/primary/L/logo.svg" alt="{abbr} logo" width="90" height="90" style="object-fit:contain" />', unsafe_allow_html=True)
         else:
             st.caption("🏀 NBA")
-        st.caption(name(team))
+        st.caption(display_team(team))
 
 from api_cache import fetch_cached, RateLimited
 
@@ -88,6 +88,12 @@ def history(key, season):
 
 def stamp(g): return pd.to_datetime(g.get('datetime'),utc=True,errors='coerce')
 def name(t): return t.get('full_name',t.get('abbreviation','?'))
+TEAM_ZH = {'Atlanta Hawks': '亞特蘭大鷹隊', 'Boston Celtics': '波士頓塞爾特人', 'Brooklyn Nets': '布魯克林籃網', 'Charlotte Hornets': '夏洛特黃蜂', 'Chicago Bulls': '芝加哥公牛', 'Cleveland Cavaliers': '克里夫蘭騎士', 'Dallas Mavericks': '達拉斯獨行俠', 'Denver Nuggets': '丹佛金塊', 'Detroit Pistons': '底特律活塞', 'Golden State Warriors': '金州勇士', 'Houston Rockets': '侯斯頓火箭', 'Indiana Pacers': '印第安納溜馬', 'LA Clippers': '洛杉磯快艇', 'Los Angeles Clippers': '洛杉磯快艇', 'Los Angeles Lakers': '洛杉磯湖人', 'Memphis Grizzlies': '孟菲斯灰熊', 'Miami Heat': '邁阿密熱火', 'Milwaukee Bucks': '密爾沃基公鹿', 'Minnesota Timberwolves': '明尼蘇達木狼', 'New Orleans Pelicans': '新奧爾良鵜鶘', 'New York Knicks': '紐約人', 'Oklahoma City Thunder': '奧克拉荷馬城雷霆', 'Orlando Magic': '奧蘭多魔術', 'Philadelphia 76ers': '費城76人', 'Phoenix Suns': '鳳凰城太陽', 'Portland Trail Blazers': '波特蘭拓荒者', 'Sacramento Kings': '薩克拉門托帝王', 'San Antonio Spurs': '聖安東尼奧馬刺', 'Toronto Raptors': '多倫多速龍', 'Utah Jazz': '猶他爵士', 'Washington Wizards': '華盛頓巫師'}
+def display_team(t):
+    english = name(t) if isinstance(t, dict) else str(t)
+    chinese = TEAM_ZH.get(english)
+    return f'{english}（{chinese}）' if chinese else english
+
 def final(g): return str(g.get('status','')).lower().startswith('final') and not g.get('postponed')
 def features(hist,h,a,day):
     result=[]
@@ -311,7 +317,7 @@ if os.environ.get('NBA_WORKER'):
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('🏀 NBA AI Prediction Platform V7.8.1 AUTO OVER/UNDER')
+st.title('🏀 NBA AI Prediction Platform V7.8.2 中文隊名 + AUTO OVER/UNDER')
 st.caption('香港時間｜GitHub Actions 共用歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -411,9 +417,9 @@ def dashboard():
                 if is_final and g.get('visitor_team_score') is not None and g.get('home_team_score') is not None:
                     away_score = int(g['visitor_team_score'])
                     home_score = int(g['home_team_score'])
-                    st.subheader(f'{name(a)} {away_score} @ {name(h)} {home_score}')
+                    st.subheader(f'{display_team(a)} {away_score} @ {display_team(h)} {home_score}')
                 else:
-                    st.subheader(f'{name(a)} @ {name(h)}')
+                    st.subheader(f'{display_team(a)} @ {display_team(h)}')
                 logo_left, logo_right = st.columns(2)
                 show_team_logo(logo_left, a)
                 show_team_logo(logo_right, h)
@@ -422,8 +428,8 @@ def dashboard():
                         away_result = '勝方' if away_score > home_score else ('平手' if away_score == home_score else '落敗')
                         home_result = '勝方' if home_score > away_score else ('平手' if home_score == away_score else '落敗')
                         score_left, score_right = st.columns(2)
-                        score_left.metric(f'客隊 · {name(a)}', f'{away_score} 分', away_result, delta_color='off')
-                        score_right.metric(f'主隊 · {name(h)}', f'{home_score} 分', home_result, delta_color='off')
+                        score_left.metric(f'客隊 · {display_team(a)}', f'{away_score} 分', away_result, delta_color='off')
+                        score_right.metric(f'主隊 · {display_team(h)}', f'{home_score} 分', home_result, delta_color='off')
                     else:
                         st.warning('賽事已完場，但比分資料尚未完整提供。')
                 elif ts<=now or g.get('postponed'): st.write('已到開賽時間或延期；不產生賽前預測。')
@@ -435,12 +441,12 @@ def dashboard():
                     else:
                         p=float(c.predict_proba([x])[0,1]); hp,ap=reg.predict([x])[0]
                         l,r=st.columns(2)
-                        l.metric(name(a),f'{ap:.0f} 分')
-                        r.metric(name(h),f'{hp:.0f} 分')
+                        l.metric(display_team(a),f'{ap:.0f} 分')
+                        r.metric(display_team(h),f'{hp:.0f} 分')
                         st.markdown('**AI 獨贏勝率**')
                         left,right=st.columns(2)
-                        left.write(f'{name(a)}（客隊）：{1-p:.1%}')
-                        right.write(f'{name(h)}（主隊）：{p:.1%}')
+                        left.write(f'{display_team(a)}（客隊）：{1-p:.1%}')
+                        right.write(f'{display_team(h)}（主隊）：{p:.1%}')
                         st.markdown(f'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden"><div style="width:{(1-p)*100:.6f}%;background:#3785ce"></div><div style="width:{p*100:.6f}%;background:#259569"></div></div>',unsafe_allow_html=True)
                         st.write('預測勝方：'+name(h if p>=.5 else a))
                         try: ledger(g,ts,p,hp,ap)
@@ -508,8 +514,8 @@ def dashboard():
                             captured,line,source=max(saved,key=lambda v:v[0])
                             adjusted=draws[:,0]-draws[:,1]+line
                             cc=st.columns(2)
-                            cc[0].metric(f'{name(h)} ({line:+g})',f'{np.mean(adjusted>0):.1%}')
-                            cc[1].metric(f'{name(a)} ({-line:+g})',f'{np.mean(adjusted<0):.1%}')
+                            cc[0].metric(f'{display_team(h)} ({line:+g})',f'{np.mean(adjusted>0):.1%}')
+                            cc[1].metric(f'{display_team(a)} ({-line:+g})',f'{np.mean(adjusted<0):.1%}')
                             st.caption(f'{source} 賠率快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
                         else:
                             st.caption('暫無已配對的賽前讓分資料；請檢查公開賠率 API 比較頁及最近一次 GitHub Actions 更新。')
