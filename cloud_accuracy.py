@@ -2,9 +2,9 @@ import pandas as pd
 import numpy as np
 import requests
 
-def request(config, method, **kwargs):
+def request(config, method, *, return_rows=False, **kwargs):
     url,key=config
-    headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'return=minimal,resolution=ignore-duplicates'}
+    headers={'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':('return=representation' if return_rows else 'return=minimal,resolution=ignore-duplicates')}
     if key.startswith('sb_secret_'): headers.pop('Authorization',None)
     r=requests.request(method,url+'/rest/v1/nba_pinnacle_odds',headers=headers,timeout=20,**kwargs)
     if not r.ok: raise ValueError(f'Pinnacle 雲端操作失敗 HTTP {r.status_code}')
@@ -27,8 +27,18 @@ def settle(config,records,games,final):
         g=byid.get(r['game_id'])
         if g and not r.get('settled'):
             patch={'actual_home_score':int(g['home_team_score']),'actual_away_score':int(g['visitor_team_score']),'settled':True}
-            request(config,'PATCH',params={'id':'eq.'+str(r['id']),'settled':'eq.false'},json=patch)
-            r.update(patch)
+            response=request(config,'PATCH',params={'id':'eq.'+str(r['id']),'settled':'eq.false'},json=patch,return_rows=True)
+            changed=response.json()
+            # HTTP 200 with [] means no row matched (e.g. already settled concurrently).
+            # Do not pretend a database update happened in that case.
+            if not isinstance(changed,list):
+                raise ValueError('Pinnacle 結算回應格式不正確')
+            if changed:
+                r.update(changed[0])
+            else:
+                # Refresh to reflect the real database state, including concurrent updates.
+                refreshed=request(config,'GET',params={'select':'*','id':'eq.'+str(r['id'])}).json()
+                if refreshed: r.update(refreshed[0])
     return records
 
 def probabilities(draws,spread,total):
