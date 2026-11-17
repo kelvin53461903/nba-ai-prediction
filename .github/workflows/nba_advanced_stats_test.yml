@@ -48,7 +48,7 @@ jobs:
           TEST_FETCH: ${{ inputs.fetch }}
         shell: bash
         run: |
-          args=(--season "$TEST_SEASON" --cutoff "$TEST_CUTOFF" --out /tmp/nba-v79-advanced-stats --timeout 25)
+          args=(--season "$TEST_SEASON" --cutoff "$TEST_CUTOFF" --out /tmp/nba-v79-advanced-stats --timeout 60)
           if [[ "$TEST_FETCH" == "true" ]]; then args+=(--fetch); fi
           python collect_advanced_stats.py "${args[@]}"
       - name: Upload CSV artifact (only when data was actually fetched)
