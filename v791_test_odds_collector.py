@@ -138,7 +138,7 @@ def main():
         'Content-Type': 'application/json',
         'Prefer': 'resolution=ignore-duplicates,return=minimal',
     }
-    endpoint = f'{url}/rest/v1/{TABLE}?on_conflict=event_id,bookmaker,captured_at_utc'
+    endpoint = f'{url}/rest/v1/{TABLE}?on_conflict=event_id,bookmaker,captured_at_utc,total_line'
     for start in range(0, len(rows), 100):
         batch = rows[start:start + 100]
         response = requests.post(endpoint, headers=headers, json=batch, timeout=30)
