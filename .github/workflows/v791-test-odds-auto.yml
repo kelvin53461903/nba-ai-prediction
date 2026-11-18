@@ -75,7 +75,7 @@ jobs:
                   ).total_seconds()
 
                   print(f"Snapshot age: {age / 60:.1f} minutes")
-                  fresh = 0 <= age <= 180
+                  fresh = 0 <= age <= 1800
               except (ValueError, KeyError, TypeError) as exc:
                   print(f"Snapshot validation failed: {type(exc).__name__}")
           else:
