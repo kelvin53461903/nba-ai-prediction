@@ -141,9 +141,33 @@ def main():
     endpoint = f'{url}/rest/v1/{TABLE}?on_conflict=event_id,bookmaker,captured_at_utc,total_line'
     for start in range(0, len(rows), 100):
         batch = rows[start:start + 100]
-        response = requests.post(endpoint, headers=headers, json=batch, timeout=30)
-        response.raise_for_status()
+        
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            json=batch,
+            timeout=30
+        )
+
+        if not response.ok:
+            print(f'TEST Supabase HTTP status: {response.status_code}')
+
+            try:
+                error_data = response.json()
+            except ValueError:
+                error_data = {}
+
+            if isinstance(error_data, dict):
+                error_code = error_data.get('code', 'unknown')
+                print(f'TEST Supabase error code: {str(error_code)[:80]}')
+            else:
+                print('TEST Supabase error code: unavailable')
+
+            print('TEST write rejected. No secrets or response body printed.')
+            response.raise_for_status()
+
         print(f'TEST batch accepted: {start + 1}-{start + len(batch)}')
+
     print('TEST upload complete (duplicates ignored).')
 
 
