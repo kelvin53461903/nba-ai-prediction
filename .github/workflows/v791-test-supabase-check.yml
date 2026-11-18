@@ -1,0 +1,70 @@
+
+name: V7.9.1 TEST Supabase Safety Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-test-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify TEST Supabase configuration
+        env:
+          TEST_URL: ${{ secrets.V791_TEST_SUPABASE_URL }}
+          TEST_REF: ${{ secrets.V791_TEST_PROJECT_REF }}
+          TEST_KEY: ${{ secrets.V791_TEST_SUPABASE_KEY }}
+          PROD_URL: ${{ secrets.SUPABASE_URL }}
+        shell: python
+        run: |
+          import os
+          from urllib.parse import urlparse
+
+          test_url = os.environ.get("TEST_URL", "").strip()
+          test_ref = os.environ.get("TEST_REF", "").strip()
+          test_key = os.environ.get("TEST_KEY", "").strip()
+          prod_url = os.environ.get("PROD_URL", "").strip()
+
+          if not all([test_url, test_ref, test_key]):
+              raise SystemExit(
+                  "FAILED: Missing TEST Supabase secret"
+              )
+
+          parsed = urlparse(test_url)
+
+          if parsed.scheme != "https":
+              raise SystemExit(
+                  "FAILED: TEST URL must use HTTPS"
+              )
+
+          if parsed.hostname != f"{test_ref}.supabase.co":
+              raise SystemExit(
+                  "FAILED: TEST URL and project ref mismatch"
+              )
+
+          if parsed.path not in ("", "/"):
+              raise SystemExit(
+                  "FAILED: Unexpected TEST URL path"
+              )
+
+          if not prod_url:
+              raise SystemExit(
+                  "FAILED: Production URL unavailable for comparison"
+              )
+
+          prod_host = urlparse(prod_url).hostname
+
+          if parsed.hostname == prod_host:
+              raise SystemExit(
+                  "FAILED: TEST and production URLs match"
+              )
+
+          print("PASS: TEST secrets are present")
+          print("PASS: TEST URL matches TEST project ref")
+          print("PASS: TEST URL differs from production URL")
+          print("PASS: No database requests performed")
+          print("PASS: No secrets printed")
