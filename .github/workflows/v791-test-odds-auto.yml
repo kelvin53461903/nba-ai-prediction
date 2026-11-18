@@ -3,6 +3,14 @@ name: V7.9.1 TEST Odds Auto Collector
 
 
 on:
+  workflow_run:
+    workflows:
+      - NBA Odds Update
+    types:
+      - completed
+    branches:
+      - main
+    
   # TEST SAFETY: scheduled runs disabled until validation.
   # schedule:
   #   - cron: '20 0,6,12,18 * * *'
