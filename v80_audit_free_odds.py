@@ -48,7 +48,7 @@ def main():
   if not rows: raise SystemExit(f"{season}: empty dataset")
   missing=REQUIRED-set(rows[0])
   if missing: raise SystemExit(f"{season}: missing columns {sorted(missing)}")
-  eligible=[]; matched=0; unmatched=[]; invalid=Counter(); keys=set()
+  eligible=[]; matched=0; unmatched=[]; invalid=Counter(); keys=set(); exact_matches=0; fallback_matches=0; score_mismatches=0
   for r in rows:
    try:
     tip=dt(r["start_time_utc"])
@@ -66,11 +66,21 @@ def main():
     if key in games:
      g=games[key]
      if int(g["home_score"])!=int(r["home_score"]) or int(g["away_score"])!=int(r["away_score"]):
-      invalid["score_mismatch"]+=1
-     else: matched+=1; seen_global.add((season,key))
-    elif len(unmatched)<5: unmatched.append({"tip":tip.isoformat(),"home":r["home_team"],"away":r["away_team"]})
+      invalid["score_mismatch"]+=1; score_mismatches+=1
+     else:
+      matched+=1; exact_matches+=1; seen_global.add((season,key))
+    else:
+     # Unique team + score match within 24h handles source tip-time rounding.
+     candidates=[]
+     for gkey,g in games.items():
+      if gkey[1:]==(norm(r["home_team"]),norm(r["away_team"])) and abs((dt(g["commence_time_utc"])-tip).total_seconds())<=86400:
+       if int(g["home_score"])==int(r["home_score"]) and int(g["away_score"])==int(r["away_score"]): candidates.append((gkey,g))
+     if len(candidates)==1:
+      matched+=1; fallback_matches+=1; seen_global.add((season,candidates[0][0]))
+     else:
+      if len(unmatched)<10: unmatched.append({"tip":tip.isoformat(),"home":r["home_team"],"away":r["away_team"],"candidate_count":len(candidates)})
    except Exception: invalid["invalid_market_or_row"]+=1
-  report["sources"][season]={"url":url,"license":"CC-BY-4.0 (dataset card)","published_rows":len(rows),"eligible_before_cutoff":len(eligible),"matched_to_verified_game_and_score":matched,"unmatched_examples":unmatched,"rejected":dict(invalid),"markets":["moneyline fair probabilities/odds","spread line + no-vig home-cover probability","total line + no-vig over probability"]}
+  report["sources"][season]={"url":url,"license":"CC-BY-4.0 (dataset card)","published_rows":len(rows),"eligible_before_cutoff":len(eligible),"matched_to_verified_game_and_score":matched,"exact_matches":exact_matches,"unique_team_score_date_fallback_matches":fallback_matches,"unmatched_count":len(eligible)-matched,"score_mismatch_count":score_mismatches,"unmatched_examples":unmatched,"rejected":dict(invalid),"markets":["moneyline fair probabilities/odds","spread line + no-vig home-cover probability","total line + no-vig over probability"]}
  report["matched_to_2459_games"]=len(seen_global)
  report["note"]="Audit only; no DB writes. Market probabilities/lines are consensus closes, not executable bookmaker prices. Verify source methodology and preserve attribution."
  Path("v80_free_odds_audit.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
