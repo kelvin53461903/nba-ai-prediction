@@ -85,7 +85,7 @@ def load_and_validate_csv() -> list[dict]:
                 raise RuntimeError(f"CSV contains a game at/after the UTC cutoff on line {line_no}")
             if verified <= commence:
                 raise RuntimeError(f"Verification timestamp is not after game time on line {line_no}")
-            if row["game_status"] != "Final" or row["season_type"] != "Regular Season":
+            if row["game_status"] != "Final" or row["season_type"] not in {"Regular Season", "Playoffs"}:
                 raise RuntimeError(f"Unexpected status or season type on line {line_no}")
             if row["home_score"] == row["away_score"] or min(row["home_score"], row["away_score"]) < 0:
                 raise RuntimeError(f"Invalid final score on line {line_no}")
@@ -105,6 +105,9 @@ def load_and_validate_csv() -> list[dict]:
     seasons = Counter(r["season"] for r in rows)
     if dict(seasons) != EXPECTED_SEASONS:
         raise RuntimeError(f"Unexpected season counts: {dict(seasons)}")
+    season_types = Counter(r["season_type"] for r in rows)
+    if season_types != Counter({"Regular Season": 2375, "Playoffs": 84}):
+        raise RuntimeError(f"Unexpected season-type counts: {dict(season_types)}")
     if max(r["commence_time_utc"] for r in rows) >= CUTOFF:
         raise RuntimeError("Dataset date range failed cutoff validation")
     return rows
