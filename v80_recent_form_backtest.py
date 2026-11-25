@@ -12,7 +12,7 @@ EXPECTED={"2024-25":1321,"2025-26":1138}
 FEATURES=["elo_diff","home_win10","away_win10","home_margin10","away_margin10",
 "home_for10","home_against10","away_for10","away_against10",
 "home_venue_margin10","away_venue_margin10","home_venue_for10","away_venue_for10",
-"home_venue_against10","away_venue_against10"]
+"home_venue_against10","away_venue_against10","home_rest_days","away_rest_days","home_back_to_back","away_back_to_back"]
 
 def connect():
     raw=os.environ.get(SECRET,"").strip()
@@ -37,10 +37,13 @@ def margin_k(m,d): return math.log(abs(m)+1)*(2.2/(2.2+0.001*abs(d)))
 def avg(items,key):
     return sum(x[key] for x in items)/len(items) if items else 0.0
 
-def make_features(g,elo,history,venue_history):
+def make_features(g,elo,history,venue_history,last_played):
     h,a=g["home_team_id"],g["away_team_id"]
     hh=list(history[h]); ah=list(history[a])
     hv=list(venue_history[(h,"home")]); av=list(venue_history[(a,"away")])
+    def rest(team):
+        if team not in last_played: return 7.0
+        return max(0.0,min(7.0,(g["commence_time_utc"]-last_played[team]).total_seconds()/86400.0))
     return [
         (elo[h]+65-elo[a])/400.0,
         avg(hh,"win"),avg(ah,"win"),
@@ -52,7 +55,7 @@ def make_features(g,elo,history,venue_history):
         avg(hv,"pa")/100.0,avg(av,"pa")/100.0
     ]
 
-def update_game(g,elo,history,venue_history):
+def update_game(g,elo,history,venue_history,last_played):
     h,a=g["home_team_id"],g["away_team_id"]
     diff=elo[h]+65-elo[a]; expected=elo_prob(diff); actual=int(bool(g["home_win"]))
     change=20*margin_k(g["home_score"]-g["away_score"],diff)*(actual-expected)
@@ -61,6 +64,8 @@ def update_game(g,elo,history,venue_history):
     history[a].append({"win":1-actual,"margin":g["away_score"]-g["home_score"],"pf":g["away_score"],"pa":g["home_score"]})
     venue_history[(h,"home")].append({"margin":g["home_score"]-g["away_score"],"pf":g["home_score"],"pa":g["away_score"]})
     venue_history[(a,"away")].append({"margin":g["away_score"]-g["home_score"],"pf":g["away_score"],"pa":g["home_score"]})
+    last_played[h]=g["commence_time_utc"]
+    last_played[a]=g["commence_time_utc"]
 
 def chronological_features(games,season):
     elo=defaultdict(lambda:1500.0)
@@ -72,9 +77,9 @@ def chronological_features(games,season):
     for tip in sorted(grouped):
         batch=grouped[tip]
         for g in batch:
-            x=make_features(g,elo,hist,venue)
+            x=make_features(g,elo,hist,venue,last_played)
             rows.append({"game":g,"x":x,"elo_p":elo_prob(elo[g["home_team_id"]]+65-elo[g["away_team_id"]])})
-        for g in batch: update_game(g,elo,hist,venue)
+        for g in batch: update_game(g,elo,hist,venue,last_played)
     return rows
 
 def fit_logistic(rows):
@@ -165,10 +170,10 @@ def main():
         "total_score_mae":sum(abs((r["predicted_home_score"]+r["predicted_away_score"])-(r["actual_home_score"]+r["actual_away_score"])) for r in outrows)/len(outrows),
         "margin_mae":sum(abs((r["predicted_home_score"]-r["predicted_away_score"])-(r["actual_home_score"]-r["actual_away_score"])) for r in outrows)/len(outrows)}
     material="\n".join(f'{g["game_id"]}|{g["commence_time_utc"].isoformat()}|{g["home_score"]}|{g["away_score"]}' for g in games).encode()
-    report={"model":"NBA V8.0 Recent Form + Home/Away Splits Logistic Regression","status":"experimental_not_approved",
+    report={"model":"NBA V8.0 Recent Form + Home/Away + Rest Days Logistic Regression","status":"experimental_not_approved",
         "training_season":"2024-25","evaluation_season":"2025-26","training_rows":len(tr),"evaluation_rows":len(te),
         "dataset_sha256":hashlib.sha256(material).hexdigest(),"features":FEATURES,
-        "method":"Chronological pregame rolling last-10 team form and last-10 home/away venue splits; logistic regression fit only on 2024-25; 2025-26 evaluated walk-forward. Same-tipoff games predicted before results update history.",
+        "method":"Chronological pregame rolling last-10 team form, last-10 home/away venue splits, days since previous game and back-to-back flags; logistic regression fit only on 2024-25; 2025-26 evaluated walk-forward. Same-tipoff games predicted before results update history.",
         "feature_model":feature_metrics,"elo_baseline":elo_metrics,"score_forecast":score,
         "model_parameters":model,"limitations":"Only historical scores/results used. No injuries, odds, rest days, or official advanced stats. Experimental only."}
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
