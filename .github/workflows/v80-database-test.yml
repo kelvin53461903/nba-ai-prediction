@@ -24,7 +24,7 @@ jobs:
     if: github.ref == 'refs/heads/v8.0-calibration-test'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: v8.0-calibration-test
+    environment: v80-calibration-test
 
     steps:
       - name: Checkout V8.0 test branch
