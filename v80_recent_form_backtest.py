@@ -71,6 +71,7 @@ def chronological_features(games,season):
     elo=defaultdict(lambda:1500.0)
     hist=defaultdict(lambda:deque(maxlen=10))
     venue=defaultdict(lambda:deque(maxlen=10))
+    last_played={}
     grouped=defaultdict(list)
     for g in games: grouped[g["commence_time_utc"]].append(g)
     rows=[]
