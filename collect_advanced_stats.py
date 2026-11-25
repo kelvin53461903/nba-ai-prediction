@@ -22,8 +22,30 @@ def fetch_json_with_retry(req, timeout, max_attempts=3):
     """Fetch NBA Stats JSON, retrying transient network timeouts only."""
     for attempt in range(1, max_attempts + 1):
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.load(resp)
+            last_error = None
+
+for attempt in range(1, 4):
+    try:
+        with urllib.request.urlopen(
+            req, timeout=timeout
+        ) as resp:
+            data = json.load(resp)
+        break
+
+    except (TimeoutError, urllib.error.URLError) as exc:
+        last_error = exc
+
+        if attempt == 3:
+            raise
+
+        wait = 15 * attempt
+
+        print(
+            f"NBA Stats timeout/error. "
+            f"Retry {attempt}/3 in {wait}s..."
+        )
+
+        time.sleep(wait)
         except (TimeoutError, socket.timeout) as exc:
             if attempt == max_attempts:
                 raise
