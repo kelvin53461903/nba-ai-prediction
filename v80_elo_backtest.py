@@ -49,6 +49,10 @@ def metric(rows,key):
 
 
 
+def logit(p):
+    p=min(1-1e-9,max(1e-9,float(p)))
+    return math.log(p/(1-p))
+
 def fit_temperature(rows):
     # Grid-search a single temperature on calibration-only predictions.
     best_t=1.0
