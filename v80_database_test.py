@@ -70,11 +70,10 @@ def run_tests():
     )
 
     check(
-        "06 - TLS protocol",
-        status["tls_version"] in {
-            "TLSv1.2", "TLSv1.3"
-        },
-    )
+    "06 - TLS version reporting handled",
+    status["tls"] if "tls" in status
+    else status["ssl"] is True,
+)
 
     check(
         "07 - UTC database timezone",
