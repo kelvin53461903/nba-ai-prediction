@@ -186,12 +186,25 @@ def connect_v80():
                     current_setting(
                         'transaction_read_only'
                     ) AS read_only,
-                    EXISTS (
-                        SELECT 1
-                        FROM pg_stat_ssl
-                        WHERE pid = pg_backend_pid()
-                          AND ssl
-                    ) AS ssl_enabled
+                    cur.execute("""
+    SELECT
+        current_database() AS database_name,
+        current_user AS database_role,
+        session_user AS session_role,
+        current_setting(
+            'transaction_read_only'
+        ) AS read_only
+""")
+
+status = cur.fetchone()
+
+ssl_enabled = conn.pgconn.ssl_in_use
+
+print("DIAGNOSTIC: Database =", status["database_name"])
+print("DIAGNOSTIC: Role =", status["database_role"])
+print("DIAGNOSTIC: Session role =", status["session_role"])
+print("DIAGNOSTIC: Read only =", status["read_only"])
+print("DIAGNOSTIC: Client SSL =", ssl_enabled)
             """)
 
             status = cur.fetchone()
@@ -205,7 +218,7 @@ def connect_v80():
                 or status["database_role"] != DATABASE_ROLE
                 or status["session_role"] != DATABASE_ROLE
                 or status["read_only"] != "on"
-                or not status["ssl_enabled"]
+                or not ssl_enabled
             ):
                 raise V80DatabaseError(
                     "V80 connection safety verification failed."
@@ -220,8 +233,9 @@ def connect_v80():
             conn.close()
 
 
+
 def check_connection():
-    """Return non-sensitive connection diagnostics."""
+    """Return non-sensitive client-side TLS diagnostics."""
 
     with connect_v80() as conn:
         with conn.cursor() as cur:
@@ -232,13 +246,18 @@ def check_connection():
                     current_setting('TimeZone') AS timezone,
                     current_setting(
                         'transaction_read_only'
-                    ) AS read_only,
-                    ssl,
-                    version AS tls_version
-                FROM pg_stat_ssl
-                WHERE pid = pg_backend_pid()
+                    ) AS read_only
             """)
 
             result = cur.fetchone()
 
+        result["ssl"] = conn.pgconn.ssl_in_use
+
+        result["tls_version"] = (
+            conn.pgconn.ssl_attribute("protocol")
+            if result["ssl"]
+            else None
+        )
+
     return result
+
