@@ -32,7 +32,7 @@ jobs:
         run: python -m py_compile v80_recent_form_backtest.py
       - name: Run isolated walk-forward feature backtest
         env:
-          V80_HISTORICAL_IMPORT_DATABASE_URL: \${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
         run: python v80_recent_form_backtest.py --out artifacts/v80-features
       - name: Upload feature report
         uses: actions/upload-artifact@v4
