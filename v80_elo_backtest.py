@@ -48,36 +48,28 @@ def metric(rows,key):
             "ece_10_bins":ece,"calibration_bins":bins}
 
 
-def logit(p):
-    p=min(1-1e-9,max(1e-9,float(p)))
-    return math.log(p/(1-p))
 
-def fit_platt(rows):
-    a,b=0.0,1.0
-    xs=[logit(r["home_probability"]) for r in rows]
-    ys=[int(r["home_win"]) for r in rows]
-    for _ in range(100):
-        g0=g1=h00=h01=h11=0.0
-        for x,y in zip(xs,ys):
-            z=max(-30.0,min(30.0,a+b*x))
+def fit_temperature(rows):
+    # Grid-search a single temperature on calibration-only predictions.
+    best_t=1.0
+    best_loss=float("inf")
+    for step in range(50,501):
+        t=step/100.0
+        loss=0.0
+        for r in rows:
+            p=min(1-1e-9,max(1e-9,float(r["home_probability"])))
+            z=max(-30.0,min(30.0,logit(p)/t))
             q=1.0/(1.0+math.exp(-z))
-            w=max(1e-9,q*(1-q))
-            g0 += y-q
-            g1 += (y-q)*x
-            h00 += w
-            h01 += w*x
-            h11 += w*x*x
-        det=h00*h11-h01*h01
-        if det < 1e-12: break
-        da=(g0*h11-g1*h01)/det
-        db=(g1*h00-g0*h01)/det
-        a += da
-        b += db
-        if abs(da)+abs(db)<1e-8: break
-    return {"intercept":a,"slope":b}
+            y=int(r["home_win"])
+            loss -= y*math.log(q)+(1-y)*math.log(1-q)
+        loss /= len(rows)
+        if loss < best_loss:
+            best_loss=loss
+            best_t=t
+    return {"temperature":best_t,"calibration_log_loss":best_loss}
 
-def apply_platt(p, params):
-    z=max(-30.0,min(30.0,params["intercept"]+params["slope"]*logit(p)))
+def apply_temperature(p, temperature):
+    z=max(-30.0,min(30.0,logit(p)/temperature))
     return 1.0/(1.0+math.exp(-z))
 
 def main():
@@ -128,12 +120,12 @@ def main():
     calibration_rows=[r for r in preds if r["commence_time_utc"] < calibration_cut]
     test_rows=[r for r in preds if r["commence_time_utc"] >= calibration_cut]
     if len(calibration_rows)<100 or len(test_rows)<100: raise RuntimeError("Insufficient calibration/test split")
-    platt=fit_platt(calibration_rows)
+    temperature=fit_temperature(calibration_rows)
     for r in preds:
         r["split"]="calibration" if r["commence_time_utc"] < calibration_cut else "test"
-        r["platt_home_probability"]=None if r["split"]=="calibration" else apply_platt(r["home_probability"],platt)
+        r["temperature_home_probability"]=None if r["split"]=="calibration" else apply_temperature(r["home_probability"],temperature["temperature"])
     raw_test=metric(test_rows,"home_probability")
-    calibrated_test=metric(test_rows,"platt_home_probability")
+    temperature_test=metric(test_rows,"temperature_home_probability")
     baseline_test=metric(test_rows,"constant_home_rate_probability")
     payload="\n".join(f'{g["game_id"]}|{g["commence_time_utc"].isoformat()}|{g["home_score"]}|{g["away_score"]}' for g in games).encode()
     report={"model":"NBA V8.0 Elo + Platt Calibration","status":"experimental_not_approved","training_season":"2024-25",
@@ -143,7 +135,7 @@ def main():
         "method":{"elo_start":1500,"k_factor":K,"home_advantage":HCA,"walk_forward":True,
         "same_tipoff_games_predicted_before_updates":True,"calibration":"Platt scaling fitted only on first half of 2025-26",
         "limitations":"Uses historical final scores only; no injuries, odds, or advanced stats. Experimental baseline, not production-ready."},
-        "platt_parameters":platt,"elo_raw_test":raw_test,"elo_platt_test":calibrated_test,"constant_home_rate_baseline_test":baseline_test}
+        "temperature_parameters":temperature,"elo_raw_test":raw_test,"elo_temperature_test":temperature_test,"constant_home_rate_baseline_test":baseline_test}
 
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     (out/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
@@ -152,7 +144,7 @@ def main():
     print("PASS: read-only TLS database access")
     print(f"PASS: chronological walk-forward; train={len(training)} test={len(testing)}")
     print("ELO_RAW_TEST:",json.dumps({k:v for k,v in raw_test.items() if k!="calibration_bins"}))
-    print("ELO_PLATT_TEST:",json.dumps({k:v for k,v in calibrated_test.items() if k!="calibration_bins"}))
+    print("ELO_TEMPERATURE_TEST:",json.dumps({k:v for k,v in temperature_test.items() if k!="calibration_bins"}))
     print("BASELINE_TEST:",json.dumps({k:v for k,v in baseline_test.items() if k!="calibration_bins"}))
     print("RESULT: BACKTEST COMPLETE; no database writes performed")
 
