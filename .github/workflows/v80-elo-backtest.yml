@@ -34,7 +34,7 @@ jobs:
         run: python -m py_compile v80_elo_backtest.py
       - name: Run chronological backtest
         env:
-          V80_HISTORICAL_IMPORT_DATABASE_URL: \${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
         run: python v80_elo_backtest.py --out artifacts/v80-elo
       - name: Upload report and predictions
         uses: actions/upload-artifact@v4
