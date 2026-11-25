@@ -1,0 +1,44 @@
+name: NBA V8.0 Free Historical Odds Audit
+
+on:
+  push:
+    branches:
+      - v8.0-calibration-test
+    paths:
+      - 'v80_audit_free_odds.py'
+      - 'data/nba_v80_historical_games_cutoff_2026-04-01.csv'
+      - '.github/workflows/v80-free-odds-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v80-free-historical-odds-audit
+  cancel-in-progress: false
+
+jobs:
+  audit-free-odds:
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout isolated V8.0 test branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Audit CC-BY-4.0 free odds datasets against verified game results
+        run: |
+          python -m py_compile v80_audit_free_odds.py
+          python v80_audit_free_odds.py
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v80-free-historical-odds-audit
+          path: v80_free_odds_audit.json
+          if-no-files-found: warn
