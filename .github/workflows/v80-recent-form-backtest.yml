@@ -1,0 +1,43 @@
+name: NBA V8.0 Recent Form Feature Backtest
+on:
+  push:
+    branches: [v8.0-calibration-test]
+    paths:
+      - 'v80_recent_form_backtest.py'
+      - '.github/workflows/v80-recent-form-backtest.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v80-recent-form-backtest
+  cancel-in-progress: false
+jobs:
+  backtest:
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: v80-calibration-test
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install read-only dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'psycopg[binary]>=3.2,<4' certifi
+      - name: Compile feature backtest
+        run: python -m py_compile v80_recent_form_backtest.py
+      - name: Run isolated walk-forward feature backtest
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: \${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python v80_recent_form_backtest.py --out artifacts/v80-features
+      - name: Upload feature report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-v80-recent-form-feature-report
+          path: artifacts/v80-features/
+          if-no-files-found: error
+          retention-days: 30
