@@ -5,8 +5,9 @@ Isolated Neon PostgreSQL connection module.
 """
 
 import os
-import certifi
 from contextlib import contextmanager
+
+import certifi
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
@@ -27,7 +28,9 @@ class V80DatabaseError(RuntimeError):
 
 
 def get_connection_config():
-    database_url = os.environ.get(SECRET_NAME, "").strip()
+    database_url = os.environ.get(
+        SECRET_NAME, ""
+    ).strip()
 
     if not database_url:
         raise V80DatabaseError(
@@ -66,7 +69,6 @@ def get_connection_config():
             "Database password is missing."
         )
 
-    # Rebuild configuration using approved parameters only.
     return {
         "host": EXPECTED_HOST,
         "port": 5432,
@@ -91,8 +93,8 @@ def connect_v80():
     """
 
     config = get_connection_config()
+    conn = None
 
-    
     try:
         print(
             "DIAGNOSTIC: libpq version =",
@@ -106,74 +108,49 @@ def connect_v80():
     except Exception as exc:
         message = str(exc).lower()
 
-        ssl_details = (
-            "unable to get local issuer certificate",
-            "self-signed certificate in certificate chain",
-            "no alternative certificate subject name matches",
-            "hostname mismatch",
-            "certificate verify failed",
-            "root certificate file",
-            "could not read root certificate",
-            "certificate has expired",
-            "certificate is not yet valid",
-        )
-
-        detail = next(
-            (
-                item for item in ssl_details
-                if item in message
-            ),
-            "UNCLASSIFIED_SSL_CERTIFICATE_ERROR"
-        )
-
-        print("DIAGNOSTIC DETAIL:", detail)
-
-        if "password authentication failed" in message:
-            reason = "PASSWORD_AUTHENTICATION_FAILED"
-
-        elif "not permitted to log in" in message:
-            reason = "ROLE_LOGIN_DISABLED"
-
-        elif "permission denied for database" in message:
-            reason = "DATABASE_ACCESS_DENIED"
-
-        elif "sslrootcert" in message:
-            reason = "SSL_ROOT_CERTIFICATE_ERROR"
-
-        elif "certificate" in message:
+        if "certificate" in message:
             reason = "SSL_CERTIFICATE_ERROR"
-
+        elif "password authentication failed" in message:
+            reason = "PASSWORD_AUTHENTICATION_FAILED"
+        elif "permission denied" in message:
+            reason = "DATABASE_ACCESS_DENIED"
         elif "channel binding" in message:
             reason = "CHANNEL_BINDING_ERROR"
-
         elif "timeout" in message:
             reason = "CONNECTION_TIMEOUT"
-
-        elif "could not translate host" in message:
-            reason = "DNS_RESOLUTION_ERROR"
-
-        elif "connection refused" in message:
-            reason = "CONNECTION_REFUSED"
-
         else:
             reason = "OTHER_CONNECTION_ERROR"
 
         print("DIAGNOSTIC:", reason)
         print("ERROR CLASS:", type(exc).__name__)
-        print(
-            "SQLSTATE:",
-            getattr(exc, "sqlstate", None),
-        )
 
         raise V80DatabaseError(
             "V80 secure database connection failed."
         ) from None
 
-
     try:
+        # Verify actual client-side TLS.
+        ssl_enabled = bool(conn.pgconn.ssl_in_use)
+
+        print(
+            "DIAGNOSTIC: Client SSL =",
+            ssl_enabled,
+        )
+
+        if not ssl_enabled:
+            raise V80DatabaseError(
+                "Client TLS verification failed."
+            )
+
         with conn.cursor() as cur:
-            cur.execute("SET TRANSACTION READ ONLY")
-            cur.execute("SET LOCAL TIME ZONE 'UTC'")
+            cur.execute(
+                "SET TRANSACTION READ ONLY"
+            )
+
+            cur.execute(
+                "SET LOCAL TIME ZONE 'UTC'"
+            )
+
             cur.execute(
                 "SET LOCAL statement_timeout = '30s'"
             )
@@ -185,57 +162,53 @@ def connect_v80():
                     session_user AS session_role,
                     current_setting(
                         'transaction_read_only'
-                    ) AS read_only,
-                    cur.execute("""
-    SELECT
-        current_database() AS database_name,
-        current_user AS database_role,
-        session_user AS session_role,
-        current_setting(
-            'transaction_read_only'
-        ) AS read_only
-""")
-
-status = cur.fetchone()
-
-ssl_enabled = conn.pgconn.ssl_in_use
-
-print("DIAGNOSTIC: Database =", status["database_name"])
-print("DIAGNOSTIC: Role =", status["database_role"])
-print("DIAGNOSTIC: Session role =", status["session_role"])
-print("DIAGNOSTIC: Read only =", status["read_only"])
-print("DIAGNOSTIC: Client SSL =", ssl_enabled)
+                    ) AS read_only
             """)
 
             status = cur.fetchone()
-            print("DIAGNOSTIC: Database =", status["database_name"])
-            print("DIAGNOSTIC: Role =", status["database_role"])
-            print("DIAGNOSTIC: Session role =", status["session_role"])
-            print("DIAGNOSTIC: Read only =", status["read_only"])
-            print("DIAGNOSTIC: SSL =", status["ssl_enabled"])
-            if (
-                status["database_name"] != DATABASE_NAME
-                or status["database_role"] != DATABASE_ROLE
-                or status["session_role"] != DATABASE_ROLE
-                or status["read_only"] != "on"
-                or not ssl_enabled
-            ):
-                raise V80DatabaseError(
-                    "V80 connection safety verification failed."
-                )
+
+        print(
+            "DIAGNOSTIC: Database =",
+            status["database_name"],
+        )
+
+        print(
+            "DIAGNOSTIC: Role =",
+            status["database_role"],
+        )
+
+        print(
+            "DIAGNOSTIC: Session role =",
+            status["session_role"],
+        )
+
+        print(
+            "DIAGNOSTIC: Read only =",
+            status["read_only"],
+        )
+
+        if (
+            status["database_name"] != DATABASE_NAME
+            or status["database_role"] != DATABASE_ROLE
+            or status["session_role"] != DATABASE_ROLE
+            or status["read_only"] != "on"
+        ):
+            raise V80DatabaseError(
+                "V80 connection safety verification failed."
+            )
 
         yield conn
 
     finally:
-        try:
-            conn.rollback()
-        finally:
-            conn.close()
-
+        if conn is not None:
+            try:
+                conn.rollback()
+            finally:
+                conn.close()
 
 
 def check_connection():
-    """Return non-sensitive client-side TLS diagnostics."""
+    """Return non-sensitive client TLS diagnostics."""
 
     with connect_v80() as conn:
         with conn.cursor() as cur:
@@ -243,7 +216,9 @@ def check_connection():
                 SELECT
                     current_database() AS database_name,
                     current_user AS database_role,
-                    current_setting('TimeZone') AS timezone,
+                    current_setting(
+                        'TimeZone'
+                    ) AS timezone,
                     current_setting(
                         'transaction_read_only'
                     ) AS read_only
@@ -251,13 +226,14 @@ def check_connection():
 
             result = cur.fetchone()
 
-        result["ssl"] = conn.pgconn.ssl_in_use
+        result["ssl"] = bool(
+            conn.pgconn.ssl_in_use
+        )
 
         result["tls_version"] = (
-            conn.pgconn.ssl_attribute("protocol")
+            conn.pgconn.ssl_attribute(b"protocol")
             if result["ssl"]
             else None
         )
 
     return result
-
