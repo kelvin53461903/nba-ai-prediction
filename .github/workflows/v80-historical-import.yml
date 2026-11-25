@@ -1,6 +1,13 @@
 name: NBA V8.0 Historical Games Import (RLS Protected)
 
 on:
+  push:
+    branches:
+      - v8.0-calibration-test
+    paths:
+      - '.github/workflows/v80-historical-import.yml'
+      - 'import_v80_historical_games.py'
+      - 'data/nba_v80_historical_games_cutoff_2026-04-01.csv'
   workflow_dispatch:
     inputs:
       import_mode:
@@ -26,7 +33,7 @@ concurrency:
 
 jobs:
   import-historical-games:
-    if: github.ref == 'refs/heads/v8.0-calibration-test' && inputs.confirm_import == true
+    if: github.ref == 'refs/heads/v8.0-calibration-test' && (github.event_name == 'push' || inputs.confirm_import == true)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: v80-calibration-test
@@ -60,6 +67,6 @@ jobs:
       - name: Validate or import 2,459 historical games through dedicated RLS role
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
-          CONFIRM_HISTORICAL_IMPORT: ${{ inputs.confirm_import && 'YES' || 'NO' }}
-          IMPORT_MODE: ${{ inputs.import_mode }}
+          CONFIRM_HISTORICAL_IMPORT: ${{ github.event_name == 'push' || inputs.confirm_import == true && 'YES' || 'NO' }}
+          IMPORT_MODE: ${{ github.event_name == 'push' && 'dry-run' || inputs.import_mode }}
         run: python import_v80_historical_games.py
