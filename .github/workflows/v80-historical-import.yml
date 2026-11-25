@@ -67,6 +67,6 @@ jobs:
       - name: Validate or import 2,459 historical games through dedicated RLS role
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
-          CONFIRM_HISTORICAL_IMPORT: ${{ github.event_name == 'push' || inputs.confirm_import == true && 'YES' || 'NO' }}
+          CONFIRM_HISTORICAL_IMPORT: ${{ (github.event_name == 'push' || inputs.confirm_import == true) && 'YES' || 'NO' }}
           IMPORT_MODE: ${{ github.event_name == 'push' && 'dry-run' || inputs.import_mode }}
         run: python import_v80_historical_games.py
