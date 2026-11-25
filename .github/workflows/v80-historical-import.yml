@@ -1,0 +1,56 @@
+name: NBA V8.0 Historical Games Import (RLS Protected)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_import:
+        description: 'Confirm import of the approved 2,459-game CSV into the isolated V8.0 test branch'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v80-historical-games-import
+  cancel-in-progress: false
+
+jobs:
+  import-historical-games:
+    if: github.ref == 'refs/heads/v8.0-calibration-test' && inputs.confirm_import == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: v80-calibration-test
+
+    steps:
+      - name: Checkout isolated V8.0 test branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Verify isolated branch and input file
+        run: |
+          test "$GITHUB_REF" = "refs/heads/v8.0-calibration-test"
+          test -f import_v80_historical_games.py
+          test -f data/nba_v80_historical_games_cutoff_2026-04-01.csv
+          echo "PASS: isolated branch and approved CSV present"
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install strict database dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'psycopg[binary]>=3.2,<4' certifi
+
+      - name: Check importer syntax
+        run: python -m py_compile import_v80_historical_games.py
+
+      - name: Import 2,459 historical games through dedicated RLS role
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+          CONFIRM_HISTORICAL_IMPORT: ${{ inputs.confirm_import && 'YES' || 'NO' }}
+        run: python import_v80_historical_games.py
