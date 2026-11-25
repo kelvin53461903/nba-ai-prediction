@@ -92,12 +92,61 @@ def connect_v80():
 
     config = get_connection_config()
 
+    
     try:
+        print(
+            "DIAGNOSTIC: libpq version =",
+            psycopg.pq.version(),
+        )
+
         conn = psycopg.connect(**config)
-    except Exception:
+
+        print("DIAGNOSTIC: Connection established")
+
+    except Exception as exc:
+        message = str(exc).lower()
+
+        if "password authentication failed" in message:
+            reason = "PASSWORD_AUTHENTICATION_FAILED"
+
+        elif "not permitted to log in" in message:
+            reason = "ROLE_LOGIN_DISABLED"
+
+        elif "permission denied for database" in message:
+            reason = "DATABASE_ACCESS_DENIED"
+
+        elif "sslrootcert" in message:
+            reason = "SSL_ROOT_CERTIFICATE_ERROR"
+
+        elif "certificate" in message:
+            reason = "SSL_CERTIFICATE_ERROR"
+
+        elif "channel binding" in message:
+            reason = "CHANNEL_BINDING_ERROR"
+
+        elif "timeout" in message:
+            reason = "CONNECTION_TIMEOUT"
+
+        elif "could not translate host" in message:
+            reason = "DNS_RESOLUTION_ERROR"
+
+        elif "connection refused" in message:
+            reason = "CONNECTION_REFUSED"
+
+        else:
+            reason = "OTHER_CONNECTION_ERROR"
+
+        print("DIAGNOSTIC:", reason)
+        print("ERROR CLASS:", type(exc).__name__)
+        print(
+            "SQLSTATE:",
+            getattr(exc, "sqlstate", None),
+        )
+
         raise V80DatabaseError(
             "V80 secure database connection failed."
         ) from None
+
 
     try:
         with conn.cursor() as cur:
@@ -124,7 +173,11 @@ def connect_v80():
             """)
 
             status = cur.fetchone()
-
+            print("DIAGNOSTIC: Database =", status["database_name"])
+            print("DIAGNOSTIC: Role =", status["database_role"])
+            print("DIAGNOSTIC: Session role =", status["session_role"])
+            print("DIAGNOSTIC: Read only =", status["read_only"])
+            print("DIAGNOSTIC: SSL =", status["ssl_enabled"])
             if (
                 status["database_name"] != DATABASE_NAME
                 or status["database_role"] != DATABASE_ROLE
