@@ -125,12 +125,12 @@ def main():
     # First half of 2025-26 is calibration-only; second half is untouched evaluation.
     tips=sorted({r["commence_time_utc"] for r in preds})
     calibration_cut=tips[len(tips)//2]
-    calibration_rows=[r for r in preds if r["commence_time_utc"] < calibration_cut.isoformat()]
-    test_rows=[r for r in preds if r["commence_time_utc"] >= calibration_cut.isoformat()]
+    calibration_rows=[r for r in preds if r["commence_time_utc"] < calibration_cut]
+    test_rows=[r for r in preds if r["commence_time_utc"] >= calibration_cut]
     if len(calibration_rows)<100 or len(test_rows)<100: raise RuntimeError("Insufficient calibration/test split")
     platt=fit_platt(calibration_rows)
     for r in preds:
-        r["split"]="calibration" if r["commence_time_utc"] < calibration_cut.isoformat() else "test"
+        r["split"]="calibration" if r["commence_time_utc"] < calibration_cut else "test"
         r["platt_home_probability"]=None if r["split"]=="calibration" else apply_platt(r["home_probability"],platt)
     raw_test=metric(test_rows,"home_probability")
     calibrated_test=metric(test_rows,"platt_home_probability")
@@ -139,7 +139,7 @@ def main():
     report={"model":"NBA V8.0 Elo + Platt Calibration","status":"experimental_not_approved","training_season":"2024-25",
         "calibration_season":"2025-26 first chronological half","evaluation_season":"2025-26 second chronological half",
         "training_rows":len(training),"calibration_rows":len(calibration_rows),"evaluation_rows":len(test_rows),
-        "calibration_cutoff_utc":calibration_cut.isoformat(),"dataset_sha256":hashlib.sha256(payload).hexdigest(),"cutoff_exclusive_utc":CUTOFF,
+        "calibration_cutoff_utc":calibration_cut,"dataset_sha256":hashlib.sha256(payload).hexdigest(),"cutoff_exclusive_utc":CUTOFF,
         "method":{"elo_start":1500,"k_factor":K,"home_advantage":HCA,"walk_forward":True,
         "same_tipoff_games_predicted_before_updates":True,"calibration":"Platt scaling fitted only on first half of 2025-26",
         "limitations":"Uses historical final scores only; no injuries, odds, or advanced stats. Experimental baseline, not production-ready."},
