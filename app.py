@@ -476,13 +476,9 @@ def dashboard():
 
                         try: ledger(g,ts,p,hp,ap)
                         except Exception as e: st.caption('預測紀錄未保存：'+str(e))
+                        # Internal residual sampling supports provisional spread/total estimates.
+                        # Raw simulation counts, intervals and histograms are intentionally hidden from the website.
                         draws=simulate(hp,ap,model[11],int(g['id']))
-                        with st.expander('10,000 次比分模擬',expanded=True):
-                            lo,hi=np.quantile(draws,[.1,.9],axis=0); total=draws.sum(axis=1); tl,th=np.quantile(total,[.1,.9]); mc=(np.sum(draws[:,0]>draws[:,1])+.5*np.sum(draws[:,0]==draws[:,1]))/len(draws)
-                            st.write(f'主隊比分 80% 模擬區間：{lo[0]:.0f}–{hi[0]:.0f}；客隊：{lo[1]:.0f}–{hi[1]:.0f}')
-                            st.write(f'預測總分：{hp+ap:.1f}；80% 模擬區間 {tl:.0f}–{th:.0f}；模擬主勝率 {mc:.1%}')
-                            counts,edges=np.histogram(total,bins=20); st.bar_chart(pd.DataFrame({"總分":edges[:-1].astype(int),"次數":counts}).set_index("總分"))
-                            st.caption('以歷史測試比分殘差成對抽樣；非保證覆蓋率，模擬勝率獨立於分類模型。')
                         st.markdown('**AI 全場大小分 Over／Under 機率**')
                         ou_quote = None
                         if public_odds:
@@ -511,7 +507,7 @@ def dashboard():
                             under_col.metric(f'Under {line_ou:g}', f'{under_ou:.1%}')
                             st.write(f'AI 預測總分 {hp+ap:.1f}｜市場盤口 {line_ou:g}｜差距 {hp+ap-line_ou:+.1f} 分')
                             st.caption(f'The Odds API / {book_title_ou}；快照 {fetched_ou.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {push_ou:.1%}。'
-                                       '機率由 10,000 次歷史測試比分殘差模擬估算，未以歷史大小分盤口校準，並非已驗證的投注勝率。')
+                                       '機率由歷史比分殘差抽樣估算，尚未以足夠歷史大小分盤口完成校準，並非已驗證的投注勝率。')
                         else:
                             st.caption('暫無已配對且 12 小時內更新的賽前全場大小分盤口，故不顯示 Over／Under 機率。')
                         st.markdown('**AI 讓分勝率**')
@@ -541,7 +537,7 @@ def dashboard():
                             cc=st.columns(2)
                             cc[0].metric(f'{display_team(h)} ({line:+g})',f'{np.mean(adjusted>0):.1%}')
                             cc[1].metric(f'{display_team(a)} ({-line:+g})',f'{np.mean(adjusted<0):.1%}')
-                            st.caption(f'{source} 賠率快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。模擬比例未經歷史盤口校準；未單獨模擬加時。')
+                            st.caption(f'{source} 賠率快照 {captured.tz_convert(HK):%Y-%m-%d %H:%M} HKT；走盤 {np.mean(adjusted==0):.1%}。抽樣比例未經歷史盤口校準；未單獨模擬加時，並非已驗證的投注勝率。')
                         else:
                             st.caption('暫無已配對的賽前讓分資料；請檢查公開賠率 API 比較頁及最近一次 GitHub Actions 更新。')
                         with st.expander('近期戰績、主客場及休息分析',expanded=True):
