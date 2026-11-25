@@ -24,11 +24,11 @@ jobs:
     if: github.ref == 'refs/heads/v8.0-calibration-test'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: v80-calibration-test
+    environment: v8.0-calibration-test
 
     steps:
       - name: Checkout V8.0 test branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -38,7 +38,7 @@ jobs:
           echo "PASS: V8.0 isolated branch"
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
