@@ -147,7 +147,6 @@ def main():
             "predicted_home_score":pred_home,"predicted_away_score":pred_away,
             "actual_home_score":g["home_score"],"actual_away_score":g["away_score"],
             "features_json":json.dumps(dict(zip(FEATURES,r["x"])))})
-    feature_rows=[{"game":r["game"],"p":r["feature_model_home_probability"]} for r in outrows]
     # Metrics use a common sample and direct probability values.
     def simple(rows,key):
         n=len(rows); ys=[int(r["home_win"]) for r in rows]; ps=[min(1-1e-12,max(1e-12,r[key])) for r in rows]
