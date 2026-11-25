@@ -29,13 +29,11 @@ INSERT_SQL = """
 INSERT INTO public.nba_game_results (
     game_id, season, season_type, home_team_id, away_team_id,
     home_team, away_team, commence_time_utc, home_score, away_score,
-    total_score, score_margin, home_win, overtime_periods,
-    game_status, source, verified_at_utc
+    overtime_periods, game_status, source, verified_at_utc
 ) VALUES (
     %(game_id)s, %(season)s, %(season_type)s, %(home_team_id)s, %(away_team_id)s,
     %(home_team)s, %(away_team)s, %(commence_time_utc)s, %(home_score)s, %(away_score)s,
-    %(total_score)s, %(score_margin)s, %(home_win)s, %(overtime_periods)s,
-    %(game_status)s, %(source)s, %(verified_at_utc)s
+    %(overtime_periods)s, %(game_status)s, %(source)s, %(verified_at_utc)s
 )
 ON CONFLICT (game_id) DO NOTHING
 """
