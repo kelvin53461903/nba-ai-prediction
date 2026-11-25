@@ -4,6 +4,7 @@ on:
     branches: [v8.0-calibration-test]
     paths:
       - 'v80_recent_form_backtest.py'
+      - 'app.py'
       - '.github/workflows/v80-recent-form-backtest.yml'
   workflow_dispatch:
 permissions:
@@ -29,7 +30,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install 'psycopg[binary]>=3.2,<4' certifi
       - name: Compile feature backtest
-        run: python -m py_compile v80_recent_form_backtest.py
+        run: |
+          python -m py_compile v80_recent_form_backtest.py
+          python -m py_compile app.py
       - name: Run isolated walk-forward feature backtest
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
