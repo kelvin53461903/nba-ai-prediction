@@ -1,0 +1,45 @@
+name: NBA V8.0 Walk-Forward Elo Backtest
+on:
+  push:
+    branches: [v8.0-calibration-test]
+    paths:
+      - 'v80_elo_backtest.py'
+      - '.github/workflows/v80-elo-backtest.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v80-elo-backtest
+  cancel-in-progress: false
+jobs:
+  backtest:
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: v80-calibration-test
+    steps:
+      - name: Checkout isolated V8.0 branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install read-only dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'psycopg[binary]>=3.2,<4' certifi
+      - name: Compile backtest
+        run: python -m py_compile v80_elo_backtest.py
+      - name: Run chronological backtest
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: \${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python v80_elo_backtest.py --out artifacts/v80-elo
+      - name: Upload report and predictions
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-v80-elo-walk-forward-report
+          path: artifacts/v80-elo/
+          if-no-files-found: error
+          retention-days: 30
