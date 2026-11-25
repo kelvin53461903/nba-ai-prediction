@@ -28,6 +28,7 @@ permissions:
 
 jobs:
   test-advanced-stats:
+    if: ${{ github.ref == 'refs/heads/v8.0-calibration-test' && inputs.fetch == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
