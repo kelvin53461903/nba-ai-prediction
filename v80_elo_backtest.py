@@ -104,7 +104,19 @@ def main():
         diff=elo[h]+HCA-elo[a]; exp=sigmoid(diff); actual=int(bool(g["home_win"]))
         change=K*margin_k(g["home_score"]-g["away_score"],diff)*(actual-exp)
         elo[h]+=change; elo[a]-=change
-    for g in training: update(g)
+    team_points=defaultdict(lambda:{"for_sum":0.0,"against_sum":0.0,"n":0})
+    def add_points(g):
+        h,a=g["home_team_id"],g["away_team_id"]
+        team_points[h]["for_sum"] += g["home_score"]
+        team_points[h]["against_sum"] += g["away_score"]
+        team_points[h]["n"] += 1
+        team_points[a]["for_sum"] += g["away_score"]
+        team_points[a]["against_sum"] += g["home_score"]
+        team_points[a]["n"] += 1
+    league_average=sum(g["home_score"]+g["away_score"] for g in training)/(2*len(training))
+    for g in training:
+        update(g)
+        add_points(g)
     grouped=defaultdict(list)
     for g in testing: grouped[g["commence_time_utc"]].append(g)
     preds=[]
@@ -112,12 +124,22 @@ def main():
         batch=grouped[tip]
         for g in batch:
             h,a=g["home_team_id"],g["away_team_id"]
+            hs=team_points[h]; aw=team_points[a]
+            h_for=hs["for_sum"]/hs["n"] if hs["n"] else league_average
+            h_against=hs["against_sum"]/hs["n"] if hs["n"] else league_average
+            a_for=aw["for_sum"]/aw["n"] if aw["n"] else league_average
+            a_against=aw["against_sum"]/aw["n"] if aw["n"] else league_average
+            pred_home=(h_for+a_against)/2.0
+            pred_away=(a_for+h_against)/2.0
             preds.append({"game_id":g["game_id"],"season":g["season"],"commence_time_utc":g["commence_time_utc"].isoformat(),
                 "home_team":g["home_team"],"away_team":g["away_team"],"home_probability":sigmoid(elo[h]+HCA-elo[a]),
                 "constant_home_rate_probability":home_rate,"home_win":bool(g["home_win"]),
+                "predicted_home_score":pred_home,"predicted_away_score":pred_away,
                 "actual_home_score":g["home_score"],"actual_away_score":g["away_score"],
                 "pre_game_home_elo":elo[h],"pre_game_away_elo":elo[a]})
-        for g in batch: update(g)
+        for g in batch:
+            update(g)
+            add_points(g)
     # First half of 2025-26 is calibration-only; second half is untouched evaluation.
     tips=sorted({r["commence_time_utc"] for r in preds})
     calibration_cut=tips[len(tips)//2]
@@ -128,18 +150,25 @@ def main():
     for r in preds:
         r["split"]="calibration" if r["commence_time_utc"] < calibration_cut else "test"
         r["temperature_home_probability"]=None if r["split"]=="calibration" else apply_temperature(r["home_probability"],temperature["temperature"])
+    score_metrics={
+        "sample_size":len(preds),
+        "home_score_mae":sum(abs(r["predicted_home_score"]-r["actual_home_score"]) for r in preds)/len(preds),
+        "away_score_mae":sum(abs(r["predicted_away_score"]-r["actual_away_score"]) for r in preds)/len(preds),
+        "total_score_mae":sum(abs((r["predicted_home_score"]+r["predicted_away_score"])-(r["actual_home_score"]+r["actual_away_score"])) for r in preds)/len(preds),
+        "margin_mae":sum(abs((r["predicted_home_score"]-r["predicted_away_score"])-(r["actual_home_score"]-r["actual_away_score"])) for r in preds)/len(preds)
+    }
     raw_test=metric(test_rows,"home_probability")
     temperature_test=metric(test_rows,"temperature_home_probability")
     baseline_test=metric(test_rows,"constant_home_rate_probability")
     payload="\n".join(f'{g["game_id"]}|{g["commence_time_utc"].isoformat()}|{g["home_score"]}|{g["away_score"]}' for g in games).encode()
-    report={"model":"NBA V8.0 Elo + Platt Calibration","status":"experimental_not_approved","training_season":"2024-25",
+    report={"model":"NBA V8.0 Elo + Rolling Score Baseline","status":"experimental_not_approved","training_season":"2024-25",
         "calibration_season":"2025-26 first chronological half","evaluation_season":"2025-26 second chronological half",
         "training_rows":len(training),"calibration_rows":len(calibration_rows),"evaluation_rows":len(test_rows),
         "calibration_cutoff_utc":calibration_cut,"dataset_sha256":hashlib.sha256(payload).hexdigest(),"cutoff_exclusive_utc":CUTOFF,
         "method":{"elo_start":1500,"k_factor":K,"home_advantage":HCA,"walk_forward":True,
-        "same_tipoff_games_predicted_before_updates":True,"calibration":"Platt scaling fitted only on first half of 2025-26",
+        "same_tipoff_games_predicted_before_updates":True,"calibration":"Temperature scaling experiment fitted only on first half of 2025-26; not pre-selected for production",
         "limitations":"Uses historical final scores only; no injuries, odds, or advanced stats. Experimental baseline, not production-ready."},
-        "temperature_parameters":temperature,"elo_raw_test":raw_test,"elo_temperature_test":temperature_test,"constant_home_rate_baseline_test":baseline_test}
+        "temperature_experiment":temperature,"score_forecast":score_metrics,"elo_raw_test":raw_test,"elo_temperature_test":temperature_test,"constant_home_rate_baseline_test":baseline_test}
 
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     (out/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
@@ -150,6 +179,7 @@ def main():
     print("ELO_RAW_TEST:",json.dumps({k:v for k,v in raw_test.items() if k!="calibration_bins"}))
     print("ELO_TEMPERATURE_TEST:",json.dumps({k:v for k,v in temperature_test.items() if k!="calibration_bins"}))
     print("BASELINE_TEST:",json.dumps({k:v for k,v in baseline_test.items() if k!="calibration_bins"}))
+    print("SCORE_FORECAST:",json.dumps(score_metrics))
     print("RESULT: BACKTEST COMPLETE; no database writes performed")
 
 if __name__=="__main__": main()
