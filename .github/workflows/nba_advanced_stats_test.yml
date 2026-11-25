@@ -1,4 +1,4 @@
-name: NBA V7.9 Advanced Stats Manual Test
+name: NBA V8.0 Advanced Stats Manual Test
 
 on:
   workflow_dispatch:
@@ -13,12 +13,12 @@ on:
           - '2025-26'
           - '2026-27'
       cutoff:
-        description: 'Historical cutoff YYYY-MM-DD (must be within season; use 2026-04-01 for first test)'
+        description: 'Historical cutoff YYYY-MM-DD (must be within season)'
         required: true
         default: '2026-04-01'
         type: string
       fetch:
-        description: 'Actually request NBA Stats? Keep false for first dry run.'
+        description: 'Actually request NBA Stats? False = dry run; true = fetch CSV artifact.'
         required: true
         default: false
         type: boolean
@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   test-advanced-stats:
-    if: ${{ github.ref == 'refs/heads/v8.0-calibration-test' && inputs.fetch == false }}
+    if: ${{ github.ref == 'refs/heads/v8.0-calibration-test' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -49,14 +49,14 @@ jobs:
           TEST_FETCH: ${{ inputs.fetch }}
         shell: bash
         run: |
-          args=(--season "$TEST_SEASON" --cutoff "$TEST_CUTOFF" --out /tmp/nba-v79-advanced-stats --timeout 60)
+          args=(--season "$TEST_SEASON" --cutoff "$TEST_CUTOFF" --out /tmp/nba-v80-advanced-stats --timeout 60)
           if [[ "$TEST_FETCH" == "true" ]]; then args+=(--fetch); fi
           python collect_advanced_stats.py "${args[@]}"
       - name: Upload CSV artifact (only when data was actually fetched)
         if: ${{ inputs.fetch == true }}
         uses: actions/upload-artifact@v4
         with:
-          name: nba-v79-advanced-stats-${{ inputs.season }}
-          path: /tmp/nba-v79-advanced-stats/*.csv
+          name: nba-v80-advanced-stats-${{ inputs.season }}
+          path: /tmp/nba-v80-advanced-stats/*.csv
           if-no-files-found: error
           retention-days: 14
