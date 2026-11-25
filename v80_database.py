@@ -106,6 +106,28 @@ def connect_v80():
     except Exception as exc:
         message = str(exc).lower()
 
+        ssl_details = (
+            "unable to get local issuer certificate",
+            "self-signed certificate in certificate chain",
+            "no alternative certificate subject name matches",
+            "hostname mismatch",
+            "certificate verify failed",
+            "root certificate file",
+            "could not read root certificate",
+            "certificate has expired",
+            "certificate is not yet valid",
+        )
+
+        detail = next(
+            (
+                item for item in ssl_details
+                if item in message
+            ),
+            "UNCLASSIFIED_SSL_CERTIFICATE_ERROR"
+        )
+
+        print("DIAGNOSTIC DETAIL:", detail)
+
         if "password authentication failed" in message:
             reason = "PASSWORD_AUTHENTICATION_FAILED"
 
