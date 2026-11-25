@@ -19,8 +19,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.8 AUTO ODDS API', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V8.0 Calibration Test', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
+
+if not os.environ.get('NBA_WORKER'):
+    st.warning('V8.0 校準測試版：獨贏模型已完成初步樣本外回測；讓球及大小分尚未完成歷史盤口校準、CLV 與長期 ROI 驗證。相關機率僅供研究，不構成投注建議。')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
 
@@ -479,7 +482,7 @@ def dashboard():
                         # Internal residual sampling supports provisional spread/total estimates.
                         # Raw simulation counts, intervals and histograms are intentionally hidden from the website.
                         draws=simulate(hp,ap,model[11],int(g['id']))
-                        st.markdown('**AI 全場大小分 Over／Under 機率**')
+                        st.markdown('**AI 全場大小分 Over／Under 機率（實驗性）**')
                         ou_quote = None
                         if public_odds:
                             event_ou = match_event(g, public_odds.get('events', []))
@@ -510,7 +513,7 @@ def dashboard():
                                        '機率由歷史比分殘差抽樣估算，尚未以足夠歷史大小分盤口完成校準，並非已驗證的投注勝率。')
                         else:
                             st.caption('暫無已配對且 12 小時內更新的賽前全場大小分盤口，故不顯示 Over／Under 機率。')
-                        st.markdown('**AI 讓分勝率**')
+                        st.markdown('**AI 讓分勝率（實驗性）**')
                         saved=[]
                         if public_odds:
                             event=match_event(g,public_odds['events'])
