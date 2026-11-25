@@ -8,6 +8,7 @@ on:
       - '.github/workflows/v80-historical-import.yml'
       - 'import_v80_historical_games.py'
       - 'data/nba_v80_historical_games_cutoff_2026-04-01.csv'
+      - 'data/V80_IMPORT_COMMIT_APPROVED.txt'
   workflow_dispatch:
     inputs:
       import_mode:
@@ -64,9 +65,16 @@ jobs:
       - name: Check importer syntax
         run: python -m py_compile import_v80_historical_games.py
 
+      - name: Verify explicit one-time import approval marker
+        if: github.event_name == 'push' && github.event.head_commit.message == 'AUTHORIZE V8.0 HISTORICAL IMPORT'
+        run: |
+          test -f data/V80_IMPORT_COMMIT_APPROVED.txt
+          grep -Fx 'I AUTHORIZE THE ONE-TIME IMPORT OF 2,459 VERIFIED GAMES INTO THE ISOLATED NBA_V80 TEST DATABASE.' data/V80_IMPORT_COMMIT_APPROVED.txt
+          echo "PASS: explicit one-time import approval marker"
+
       - name: Validate or import 2,459 historical games through dedicated RLS role
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
           CONFIRM_HISTORICAL_IMPORT: ${{ (github.event_name == 'push' || inputs.confirm_import == true) && 'YES' || 'NO' }}
-          IMPORT_MODE: ${{ github.event_name == 'push' && 'dry-run' || inputs.import_mode }}
+          IMPORT_MODE: ${{ github.event_name == 'push' && github.event.head_commit.message == 'AUTHORIZE V8.0 HISTORICAL IMPORT' && 'commit' || github.event_name == 'push' && 'dry-run' || inputs.import_mode }}
         run: python import_v80_historical_games.py
