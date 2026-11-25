@@ -177,7 +177,7 @@ def main():
         "dataset_sha256":hashlib.sha256(material).hexdigest(),"features":FEATURES,
         "method":"Chronological pregame rolling last-10 team form, last-10 home/away venue splits, days since previous game and back-to-back flags; logistic regression fit only on 2024-25; 2025-26 evaluated walk-forward. Same-tipoff games predicted before results update history.",
         "feature_model":feature_metrics,"elo_baseline":elo_metrics,"score_forecast":score,
-        "model_parameters":model,"limitations":"Only historical scores/results used. No injuries, odds, rest days, or official advanced stats. Experimental only."}
+        "model_parameters":model,"limitations":"Only historical scores/results and game timestamps used. Rest days and back-to-back flags are derived from the prior game timestamps available inside each evaluated season; no injury snapshots, historical odds, or official ORtg/DRtg/Pace snapshots are included. Experimental only; the first game in each split uses a neutral 7-day rest default because earlier-season schedule context is not carried into this split."}
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     (out/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     with (out/"predictions.csv").open("w",newline="",encoding="utf-8") as f:
