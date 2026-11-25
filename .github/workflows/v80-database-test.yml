@@ -1,9 +1,5 @@
-- name: Install SSL certificate dependencies
-  run: |
-    python -m pip install --upgrade pip
-    python -m pip install certifi
-name: NBA V8.0 Neon Database Test
 
+name: NBA V8.0 Neon Database Test
 
 on:
   workflow_dispatch:
@@ -16,7 +12,6 @@ on:
       - 'v80_database_test.py'
       - 'requirements.txt'
 
-
 permissions:
   contents: read
 
@@ -26,17 +21,12 @@ concurrency:
 
 jobs:
   database-test:
-
-    if: ${{ github.ref == 'refs/heads/v8.0-calibration-test' }}
-
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
     runs-on: ubuntu-latest
-
     timeout-minutes: 10
-
     environment: v80-calibration-test
 
     steps:
-
       - name: Checkout V8.0 test branch
         uses: actions/checkout@v4
         with:
@@ -52,10 +42,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PostgreSQL driver
+      - name: Install database and SSL dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "psycopg[binary]>=3.2,<4"
+          python -m pip install "psycopg[binary]>=3.2,<4" certifi
 
       - name: Verify required files
         run: |
@@ -91,4 +81,3 @@ jobs:
           echo "V8.0 DATABASE TEST COMPLETED"
           echo "Read-only connection test"
           echo "No production database credentials supplied"
-          echo "No GitHub repository write permission"
