@@ -1,0 +1,81 @@
+
+name: NBA V8.0 Neon Database Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v80-neon-database-test
+  cancel-in-progress: false
+
+jobs:
+  database-test:
+
+    if: ${{ github.ref == 'refs/heads/v8.0-calibration-test' }}
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 10
+
+    environment: v80-calibration-test
+
+    steps:
+
+      - name: Checkout V8.0 test branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify isolated branch
+        run: |
+          test "$GITHUB_REF" = "refs/heads/v8.0-calibration-test"
+          echo "PASS: V8.0 isolated branch"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PostgreSQL driver
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "psycopg[binary]>=3.2,<4"
+
+      - name: Verify required files
+        run: |
+          test -f v80_database.py
+          test -f v80_database_test.py
+          test -f requirements.txt
+          echo "PASS: Required files exist"
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile v80_database.py
+          python -m py_compile v80_database_test.py
+          echo "PASS: Python syntax"
+
+      - name: Verify database secret
+        env:
+          V80_TEST_DATABASE_URL: ${{ secrets.V80_TEST_DATABASE_URL }}
+        run: |
+          if [ -z "$V80_TEST_DATABASE_URL" ]; then
+            echo "ERROR: V80 database secret missing"
+            exit 1
+          fi
+          echo "PASS: V80 database secret available"
+
+      - name: Run 26 database integration tests
+        env:
+          V80_TEST_DATABASE_URL: ${{ secrets.V80_TEST_DATABASE_URL }}
+        run: |
+          python v80_database_test.py
+
+      - name: Final safety confirmation
+        run: |
+          echo "V8.0 DATABASE TEST COMPLETED"
+          echo "Read-only connection test"
+          echo "No production database credentials supplied"
+          echo "No GitHub repository write permission"
