@@ -47,6 +47,39 @@ def metric(rows,key):
             "log_loss":-sum(y*math.log(p)+(1-y)*math.log(1-p) for p,y in zip(ps,ys))/n,
             "ece_10_bins":ece,"calibration_bins":bins}
 
+
+def logit(p):
+    p=min(1-1e-9,max(1e-9,float(p)))
+    return math.log(p/(1-p))
+
+def fit_platt(rows):
+    a,b=0.0,1.0
+    xs=[logit(r["home_probability"]) for r in rows]
+    ys=[int(r["home_win"]) for r in rows]
+    for _ in range(100):
+        g0=g1=h00=h01=h11=0.0
+        for x,y in zip(xs,ys):
+            z=max(-30.0,min(30.0,a+b*x))
+            q=1.0/(1.0+math.exp(-z))
+            w=max(1e-9,q*(1-q))
+            g0 += y-q
+            g1 += (y-q)*x
+            h00 += w
+            h01 += w*x
+            h11 += w*x*x
+        det=h00*h11-h01*h01
+        if det < 1e-12: break
+        da=(g0*h11-g1*h01)/det
+        db=(g1*h00-g0*h01)/det
+        a += da
+        b += db
+        if abs(da)+abs(db)<1e-8: break
+    return {"intercept":a,"slope":b}
+
+def apply_platt(p, params):
+    z=max(-30.0,min(30.0,params["intercept"]+params["slope"]*logit(p)))
+    return 1.0/(1.0+math.exp(-z))
+
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument("--out",default="artifacts/v80-elo"); args=ap.parse_args()
     conn=connect()
@@ -89,25 +122,38 @@ def main():
                 "actual_home_score":g["home_score"],"actual_away_score":g["away_score"],
                 "pre_game_home_elo":elo[h],"pre_game_away_elo":elo[a]})
         for g in batch: update(g)
-    em=metric(preds,"home_probability"); bm=metric(preds,"constant_home_rate_probability")
+    # First half of 2025-26 is calibration-only; second half is untouched evaluation.
+    tips=sorted({r["commence_time_utc"] for r in preds})
+    calibration_cut=tips[len(tips)//2]
+    calibration_rows=[r for r in preds if r["commence_time_utc"] < calibration_cut.isoformat()]
+    test_rows=[r for r in preds if r["commence_time_utc"] >= calibration_cut.isoformat()]
+    if len(calibration_rows)<100 or len(test_rows)<100: raise RuntimeError("Insufficient calibration/test split")
+    platt=fit_platt(calibration_rows)
+    for r in preds:
+        r["split"]="calibration" if r["commence_time_utc"] < calibration_cut.isoformat() else "test"
+        r["platt_home_probability"]=None if r["split"]=="calibration" else apply_platt(r["home_probability"],platt)
+    raw_test=metric(test_rows,"home_probability")
+    calibrated_test=metric(test_rows,"platt_home_probability")
+    baseline_test=metric(test_rows,"constant_home_rate_probability")
     payload="\n".join(f'{g["game_id"]}|{g["commence_time_utc"].isoformat()}|{g["home_score"]}|{g["away_score"]}' for g in games).encode()
-    report={"model":"NBA V8.0 Elo Baseline","status":"experimental_not_approved","training_season":"2024-25",
-        "evaluation_season":"2025-26","training_rows":len(training),"evaluation_rows":len(testing),
-        "dataset_sha256":hashlib.sha256(payload).hexdigest(),"cutoff_exclusive_utc":CUTOFF,
+    report={"model":"NBA V8.0 Elo + Platt Calibration","status":"experimental_not_approved","training_season":"2024-25",
+        "calibration_season":"2025-26 first chronological half","evaluation_season":"2025-26 second chronological half",
+        "training_rows":len(training),"calibration_rows":len(calibration_rows),"evaluation_rows":len(test_rows),
+        "calibration_cutoff_utc":calibration_cut.isoformat(),"dataset_sha256":hashlib.sha256(payload).hexdigest(),"cutoff_exclusive_utc":CUTOFF,
         "method":{"elo_start":1500,"k_factor":K,"home_advantage":HCA,"walk_forward":True,
-        "same_tipoff_games_predicted_before_updates":True,"calibration":"none",
+        "same_tipoff_games_predicted_before_updates":True,"calibration":"Platt scaling fitted only on first half of 2025-26",
         "limitations":"Uses historical final scores only; no injuries, odds, or advanced stats. Experimental baseline, not production-ready."},
-        "elo":em,"constant_home_rate_baseline":bm,
-        "delta_elo_minus_baseline":{"accuracy":em["accuracy"]-bm["accuracy"],"brier_score":em["brier_score"]-bm["brier_score"],
-        "log_loss":em["log_loss"]-bm["log_loss"],"ece":em["ece_10_bins"]-bm["ece_10_bins"]}}
+        "platt_parameters":platt,"elo_raw_test":raw_test,"elo_platt_test":calibrated_test,"constant_home_rate_baseline_test":baseline_test}
+
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     (out/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     with (out/"predictions.csv").open("w",newline="",encoding="utf-8") as f:
         w=csv.DictWriter(f,fieldnames=list(preds[0])); w.writeheader(); w.writerows(preds)
     print("PASS: read-only TLS database access")
     print(f"PASS: chronological walk-forward; train={len(training)} test={len(testing)}")
-    print("ELO:",json.dumps({k:v for k,v in em.items() if k!="calibration_bins"}))
-    print("BASELINE:",json.dumps({k:v for k,v in bm.items() if k!="calibration_bins"}))
+    print("ELO_RAW_TEST:",json.dumps({k:v for k,v in raw_test.items() if k!="calibration_bins"}))
+    print("ELO_PLATT_TEST:",json.dumps({k:v for k,v in calibrated_test.items() if k!="calibration_bins"}))
+    print("BASELINE_TEST:",json.dumps({k:v for k,v in baseline_test.items() if k!="calibration_bins"}))
     print("RESULT: BACKTEST COMPLETE; no database writes performed")
 
 if __name__=="__main__": main()
