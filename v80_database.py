@@ -207,6 +207,7 @@ def connect_v80():
                 conn.close()
 
 
+
 def check_connection():
     """Return non-sensitive client TLS diagnostics."""
 
@@ -230,10 +231,9 @@ def check_connection():
             conn.pgconn.ssl_in_use
         )
 
-        result["tls_version"] = (
-            conn.pgconn.ssl_attribute(b"protocol")
-            if result["ssl"]
-            else None
-        )
+        # Psycopg 3 PGconn does not expose
+        # ssl_attribute() in its public API.
+        # Do not invent a TLS protocol version.
+        result["tls_version"] = None
 
     return result
