@@ -140,6 +140,9 @@ def connect_import_role():
 def main():
     if os.environ.get("CONFIRM_HISTORICAL_IMPORT") != "YES":
         raise RuntimeError("Import not confirmed; use the protected manual workflow confirmation.")
+    import_mode = os.environ.get("IMPORT_MODE", "dry-run").strip().lower()
+    if import_mode not in {"dry-run", "commit"}:
+        raise RuntimeError("IMPORT_MODE must be either dry-run or commit.")
     rows = load_and_validate_csv()
     print(f"PASS: validated {len(rows)} unique games; seasons={EXPECTED_SEASONS}; UTC cutoff exclusive=2026-04-02T00:00:00Z", flush=True)
 
@@ -190,9 +193,13 @@ def main():
             totals = cur.fetchone()
             if tuple(totals) != (EXPECTED_TOTAL, EXPECTED_TOTAL, 0, 1321, 1138):
                 raise RuntimeError(f"Post-import verification failed: {tuple(totals)}")
-        conn.commit()
         print("PASS: database verification", flush=True)
-        print("RESULT: 2459/2459 historical games committed", flush=True)
+        if import_mode == "dry-run":
+            conn.rollback()
+            print("RESULT: DRY RUN PASSED; all 2459 rows validated inside transaction and rolled back; database unchanged", flush=True)
+        else:
+            conn.commit()
+            print("RESULT: 2459/2459 historical games committed", flush=True)
     except Exception:
         conn.rollback()
         raise
