@@ -5,8 +5,8 @@ Isolated Neon PostgreSQL connection module.
 """
 
 import os
+import certifi
 from contextlib import contextmanager
-
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
@@ -74,7 +74,7 @@ def get_connection_config():
         "user": DATABASE_ROLE,
         "password": config["password"],
         "sslmode": "verify-full",
-        "sslrootcert": "system",
+        "sslrootcert": certifi.where(),
         "channel_binding": "require",
         "connect_timeout": 15,
         "application_name": "NBA_AI_V80_TEST",
