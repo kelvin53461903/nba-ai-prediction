@@ -3,8 +3,16 @@ name: NBA V8.0 Historical Games Import (RLS Protected)
 on:
   workflow_dispatch:
     inputs:
+      import_mode:
+        description: 'Choose rollback-only validation first; commit only after dry run passes'
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - commit
       confirm_import:
-        description: 'Confirm import of the approved 2,459-game CSV into the isolated V8.0 test branch'
+        description: 'Confirm execution against the isolated V8.0 test database'
         required: true
         default: false
         type: boolean
@@ -49,8 +57,9 @@ jobs:
       - name: Check importer syntax
         run: python -m py_compile import_v80_historical_games.py
 
-      - name: Import 2,459 historical games through dedicated RLS role
+      - name: Validate or import 2,459 historical games through dedicated RLS role
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
           CONFIRM_HISTORICAL_IMPORT: ${{ inputs.confirm_import && 'YES' || 'NO' }}
+          IMPORT_MODE: ${{ inputs.import_mode }}
         run: python import_v80_historical_games.py
