@@ -52,7 +52,8 @@ def make_features(g,elo,history,venue_history,last_played):
         avg(ah,"pf")/100.0,avg(ah,"pa")/100.0,
         avg(hv,"margin")/20.0,avg(av,"margin")/20.0,
         avg(hv,"pf")/100.0,avg(av,"pf")/100.0,
-        avg(hv,"pa")/100.0,avg(av,"pa")/100.0
+        avg(hv,"pa")/100.0,avg(av,"pa")/100.0,
+        rest(h),rest(a),float(rest(h)<=1.01),float(rest(a)<=1.01)
     ]
 
 def update_game(g,elo,history,venue_history,last_played):
