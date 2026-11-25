@@ -2,8 +2,8 @@
 import argparse,csv,hashlib,json,math,os
 from collections import defaultdict,deque
 from pathlib import Path
+from urllib.parse import urlsplit,unquote
 import certifi,psycopg
-from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
 
 SECRET="V80_HISTORICAL_IMPORT_DATABASE_URL"
@@ -17,11 +17,12 @@ FEATURES=["elo_diff","home_win10","away_win10","home_margin10","away_margin10",
 def connect():
     raw=os.environ.get(SECRET,"").strip()
     if not raw: raise RuntimeError("Missing isolated DB secret")
-    cfg=conninfo_to_dict(raw)
-    if cfg.get("dbname")!="nba_v80" or cfg.get("user")!="v80_historical_import" or not cfg.get("host","").endswith("neon.tech"):
+    u=urlsplit(raw)
+    cfg={"host":u.hostname or "","port":u.port or 5432,"dbname":u.path.lstrip("/"),"user":unquote(u.username or ""),"password":unquote(u.password or "")}
+    if cfg["dbname"]!="nba_v80" or cfg["user"]!="v80_historical_import" or not cfg["host"].endswith("neon.tech"):
         raise RuntimeError("Unexpected database or role")
-    c=psycopg.connect(host=cfg["host"],port=int(cfg.get("port","5432")),dbname="nba_v80",user="v80_historical_import",
-        password=cfg.get("password"),sslmode="verify-full",sslrootcert=certifi.where(),channel_binding="require",
+    c=psycopg.connect(host=cfg["host"],port=int(cfg["port"]),dbname="nba_v80",user="v80_historical_import",
+        password=cfg["password"],sslmode="verify-full",sslrootcert=certifi.where(),channel_binding="require",
         connect_timeout=15,application_name="NBA_V80_FEATURE_BACKTEST",row_factory=dict_row)
     if not c.pgconn.ssl_in_use: c.close(); raise RuntimeError("TLS not active")
     return c
