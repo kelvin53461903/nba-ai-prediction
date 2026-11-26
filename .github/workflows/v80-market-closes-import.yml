@@ -1,0 +1,60 @@
+name: NBA V8.0 Historical Market Closes Import
+
+on:
+  push:
+    branches:
+      - v8.0-calibration-test
+    paths:
+      - '.github/workflows/v80-market-closes-import.yml'
+      - 'import_v80_historical_market_closes.py'
+      - 'data/nba_v80_historical_games_cutoff_2026-04-01.csv'
+  workflow_dispatch:
+    inputs:
+      import_mode:
+        description: 'Dry-run first; commit only after reviewing a successful dry-run'
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - commit
+      confirm_import:
+        description: 'Confirm import into isolated nba_v80 test database'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v80-historical-market-closes-import
+  cancel-in-progress: false
+
+jobs:
+  import-market-closes:
+    if: github.ref == 'refs/heads/v8.0-calibration-test' && (github.event_name == 'push' || inputs.confirm_import == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: v80-calibration-test
+    steps:
+      - name: Checkout isolated V8.0 test branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install secure PostgreSQL dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'psycopg[binary]>=3.2,<4' certifi
+      - name: Check importer syntax
+        run: python -m py_compile import_v80_historical_market_closes.py
+      - name: Validate or import 2,445 historical market-close rows
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+          CONFIRM_MARKET_IMPORT: ${{ (github.event_name == 'push' || inputs.confirm_import == true) && 'YES' || 'NO' }}
+          IMPORT_MODE: ${{ github.event_name == 'push' && 'dry-run' || inputs.import_mode }}
+        run: python import_v80_historical_market_closes.py
