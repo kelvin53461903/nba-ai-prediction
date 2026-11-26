@@ -131,6 +131,32 @@ def sbr_close_lines(row: dict) -> tuple[float | None, float | None]:
         return None, abs(s) if 150 <= abs(s) <= 300 else None
     return None, None
 
+def market_quality_rejection_reasons(
+    ml_brier: float | None,
+    score_exact: int,
+    score_mismatch: int,
+    score_missing: int,
+    total_over_rate: float | None,
+    mean_total_line: float | None,
+    mean_actual_total: float | None,
+    invalid_spread_rows: int,
+    invalid_total_rows: int,
+) -> list[str]:
+    """Conservative quarantine gate; failing any condition blocks benchmark use."""
+    reasons = []
+    if ml_brier is None or ml_brier > 0.25:
+        reasons.append("de-vigged moneyline Brier score exceeds 0.25 or is unavailable")
+    if score_exact == 0 or score_mismatch > 0 or score_missing > 0:
+        reasons.append("not all candidate game matches have exact source-to-database final-score verification")
+    if total_over_rate is not None and total_over_rate > 0.70:
+        reasons.append("over/under settlement is severely imbalanced (>70% over), indicating a likely line-field or parsing problem")
+    if mean_total_line is not None and mean_actual_total is not None and abs(mean_total_line - mean_actual_total) > 15:
+        reasons.append("mean total line differs from mean final game total by more than 15 points")
+    if invalid_spread_rows > 0 or invalid_total_rows > 0:
+        reasons.append("some spread/total line rows are missing or outside plausible ranges")
+    return reasons
+
+
 def audit_sbr(games: list[dict]) -> dict:
     path = SOURCE_CACHE / "nba_archive_10Y.json"
     download(SBR_URL, path)
@@ -330,17 +356,17 @@ def audit_sbr(games: list[dict]) -> dict:
     total_over_rate = (total_results["over"] / sum(total_results.values())) if sum(total_results.values()) else None
     total_line_mean = (sum(total_line_values) / len(total_line_values)) if total_line_values else None
     actual_total_mean = (sum(actual_total_values) / len(actual_total_values)) if actual_total_values else None
-    acceptance_reasons = []
-    if ml_brier is None or ml_brier > 0.25:
-        acceptance_reasons.append("de-vigged moneyline Brier score exceeds 0.25 or is unavailable")
-    if score_checks["exact_match"] == 0 or score_checks["mismatch"] > 0 or score_checks["missing_or_invalid"] > 0:
-        acceptance_reasons.append("not all candidate game matches have exact source-to-database final-score verification")
-    if total_over_rate is not None and total_over_rate > 0.70:
-        acceptance_reasons.append("over/under settlement is severely imbalanced (>70% over), indicating a likely line-field or parsing problem")
-    if total_line_mean is not None and actual_total_mean is not None and abs(total_line_mean - actual_total_mean) > 15:
-        acceptance_reasons.append("mean total line differs from mean final game total by more than 15 points")
-    if market_counts["invalid_or_missing_spread_line"] > 0 or market_counts["invalid_or_missing_total_line"] > 0:
-        acceptance_reasons.append("some spread/total line rows are missing or outside plausible ranges")
+    acceptance_reasons = market_quality_rejection_reasons(
+        ml_brier,
+        score_checks["exact_match"],
+        score_checks["mismatch"],
+        score_checks["missing_or_invalid"],
+        total_over_rate,
+        total_line_mean,
+        actual_total_mean,
+        market_counts["invalid_or_missing_spread_line"],
+        market_counts["invalid_or_missing_total_line"],
+    )
     market_acceptance = {
         "status": "REJECTED_PENDING_SOURCE_REPARSE" if acceptance_reasons else "PROVISIONAL_REQUIRES_MANUAL_REVIEW",
         "reasons": acceptance_reasons,
