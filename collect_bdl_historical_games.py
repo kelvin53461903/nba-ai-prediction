@@ -79,11 +79,26 @@ def fetch_season(session, year, min_interval, max_pages):
             commence = parse_datetime(game)
             if commence >= dt.datetime.now(dt.timezone.utc):
                 continue
-            raw_type = str(game.get("postseason") and "Playoffs" or game.get("season_type") or "Regular Season")
-            type_map = {"regular": "Regular Season", "playoffs": "Playoffs", "playin": "PlayIn", "preseason": "Pre Season"}
-            season_type = type_map.get(raw_type.lower(), raw_type)
-            if season_type not in {"Regular Season", "Playoffs", "PlayIn", "Pre Season"}:
-                season_type = "Regular Season"
+            raw_type = str(game.get("season_type") or "").strip().lower()
+            type_map = {"regular": "Regular Season", "regular season": "Regular Season",
+                        "playoffs": "Playoffs", "playoff": "Playoffs"}
+            if raw_type:
+                season_type = type_map.get(raw_type)
+                if season_type not in {"Regular Season", "Playoffs"}:
+                    continue
+            else:
+                # BALLDONTLIE's games endpoint may expose only a postseason boolean.
+                # Apply official season calendar bounds so preseason is never mislabeled regular season.
+                season_windows = {
+                    2020: ("2020-12-22", "2021-07-21"),
+                    2021: ("2021-10-19", "2022-06-16"),
+                    2022: ("2022-10-18", "2023-06-12"),
+                    2023: ("2023-10-24", "2024-06-17"),
+                }
+                start_day, end_day = season_windows[year]
+                if not (start_day <= commence.date().isoformat() <= end_day):
+                    continue
+                season_type = "Playoffs" if bool(game.get("postseason")) else "Regular Season"
             rows.append({
                 "game_id": int(game["id"]),
                 "season": season_label(int(game.get("season", year))),
