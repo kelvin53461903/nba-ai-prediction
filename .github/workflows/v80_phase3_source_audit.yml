@@ -60,6 +60,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nba-v80-phase3-source-audit
-          path: |\n            artifacts/v80_phase3/\n            artifacts/v80_phase4b/
+          path: |
+            artifacts/v80_phase3/
+            artifacts/v80_phase4b/
           if-no-files-found: warn
           retention-days: 30
