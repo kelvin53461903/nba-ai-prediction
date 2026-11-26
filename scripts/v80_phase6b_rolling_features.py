@@ -60,11 +60,11 @@ def main():
  if len(rows)!=len(obj["rows"]): raise RuntimeError("Row count changed during feature engineering")
  if len({r["nba_game_id"] for r in rows})!=len(rows): raise RuntimeError("Duplicate game IDs")
  out={"phase":"V8.0_PHASE6B","mode":"LEAK_SAFE_ROLLING_TEAM_FORM_FEATURES",
-  "window_games":WINDOW,"rows":len(rows),"same_date_results_excluded":True,
+  "window_games":WINDOW,"row_count":len(rows),"same_date_results_excluded":True,
   "features":["home/away previous-10-game win rate","points for/against averages","net points average","rest days","home-away form differences"],
   "source_dataset_rows":len(obj["rows"]),"database_writes":0,
   "limitations":["Features use prior final scores only; no player injuries or roster availability.","Historical team names are taken from source rows.","This is research feature engineering, not a live prediction model."]}
- (OUT/"leak_safe_team_form_dataset.json").write_text(json.dumps(out,indent=2),encoding="utf-8")
- print(json.dumps({k:v for k,v in out.items() if k!="rows"},indent=2))
+ (OUT/"leak_safe_team_form_dataset.json").write_text(json.dumps({**out,"rows":rows},indent=2),encoding="utf-8")
+ print(json.dumps(out,indent=2))
  print("RESULT: PHASE 6B LEAK-SAFE FEATURE ENGINEERING COMPLETE")
 if __name__=="__main__": main()
