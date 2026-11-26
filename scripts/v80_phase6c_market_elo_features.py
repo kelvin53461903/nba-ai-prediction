@@ -8,7 +8,7 @@ consensus lines only; no player/injury data or bookmaker prices.
 from __future__ import annotations
 import json
 from collections import defaultdict, deque
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import math
 
@@ -23,6 +23,29 @@ def _mean(values):
 
 def _rate(values):
  return sum(values)/len(values) if values else None
+
+def _parse_aware_utc(value):
+ if isinstance(value,datetime):
+  dt=value
+ elif isinstance(value,str):
+  try: dt=datetime.fromisoformat(value.replace("Z","+00:00"))
+  except ValueError: return None
+ else: return None
+ if dt.tzinfo is None or dt.utcoffset() is None: return None
+ return dt
+
+def filter_pre_tip_rows(rows):
+ """Keep only quotes with a timezone-aware snapshot strictly before tip-off."""
+ kept=[]; rejected={"missing_or_invalid_timestamp":0,"snapshot_at_or_after_tip":0}
+ for row in rows:
+  snap=_parse_aware_utc(row.get("closing_snapshot"))
+  tip=_parse_aware_utc(row.get("commence_time_utc"))
+  if snap is None or tip is None:
+   rejected["missing_or_invalid_timestamp"]+=1; continue
+  if snap>=tip:
+   rejected["snapshot_at_or_after_tip"]+=1; continue
+  kept.append(row)
+ return kept,rejected
 
 def enrich_rows(rows):
  ordered=sorted(rows,key=lambda r:(r["game_date"],r["commence_time_utc"],r["nba_game_id"]))
@@ -93,11 +116,20 @@ def main():
  obj=json.loads(SOURCE.read_text(encoding="utf-8"))
  if obj.get("report",{}).get("acceptance")!="DATASET_CANDIDATE_FOR_BENCHMARK_ONLY" or not obj.get("rows"):
   raise RuntimeError("Phase 5 dataset not accepted")
- rows=enrich_rows(obj["rows"])
- if len(rows)!=len(obj["rows"]) or len({r["nba_game_id"] for r in rows})!=len(rows):
+ source_rows=obj["rows"]
+ pre_tip_rows,rejected=filter_pre_tip_rows(source_rows)
+ if len(pre_tip_rows)<1000:
+  raise RuntimeError(f"Too few strict pre-tip rows for research: {len(pre_tip_rows)}")
+ rows=enrich_rows(pre_tip_rows)
+ if len(rows)!=len(pre_tip_rows) or len({r["nba_game_id"] for r in rows})!=len(rows):
   raise RuntimeError("Row count or game ID integrity failure")
+ if any(_parse_aware_utc(r["closing_snapshot"])>=_parse_aware_utc(r["commence_time_utc"]) for r in rows):
+  raise RuntimeError("Post-tip snapshot leakage detected after filter")
  report={"phase":"V8.0_PHASE6C","mode":"LEAK_SAFE_ROLLING_MARKET_RESIDUAL_AND_ELO",
-  "row_count":len(rows),"same_date_results_excluded":True,"windows":list(WINDOWS),
+  "source_row_count":len(source_rows),"row_count":len(rows),
+  "excluded_snapshot_rows":rejected,
+  "pre_tip_snapshot_validation":"PASS",
+  "same_date_results_excluded":True,"windows":list(WINDOWS),
   "features":["rolling 5/10/20 win rates","rolling points for/against/net points",
    "rolling ATS cover rate and ATS margin","rolling Over rate and total residual",
    "pregame Elo ratings and differences","rest days"],
