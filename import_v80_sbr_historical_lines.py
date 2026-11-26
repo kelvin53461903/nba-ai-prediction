@@ -84,8 +84,8 @@ def main():
     has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','TRUNCATE'),
     (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='public.nba_historical_bookmaker_lines'::regclass)""")
    state=cur.fetchone()
-   if tuple(state)!=("nba_v80","v80_historical_import","v80_historical_import","off",False,True,False,False,False,True):
-    raise RuntimeError(f"Least-privilege/RLS checks failed: {tuple(state)}")
+   if tuple(state.values())!=("nba_v80","v80_historical_import","v80_historical_import","off",False,True,False,False,False,True):
+    raise RuntimeError(f"Least-privilege/RLS checks failed: {tuple(state.values())}")
    cur.execute("""SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='nba_historical_bookmaker_lines'
     AND policyname='v80_historical_bookmaker_import_insert' AND cmd='INSERT'
     AND 'v80_historical_import'=ANY(roles) AND with_check LIKE '%2026-04-02%'""")
