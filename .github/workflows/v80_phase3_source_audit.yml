@@ -9,7 +9,6 @@ on:
       - "scripts/v80_phase3_source_audit.py"
       - "tests/test_v80_phase3_source_audit.py"
       - "scripts/v80_phase4b_sbr_repair_audit.py"
-      - "tests/test_v80_phase4b_sbr_repair_audit.py scripts/v80_phase4c_consensus_audit.py tests/test_v80_phase4c_consensus_audit.py"
       - "scripts/v80_phase4c_consensus_audit.py"
       - "tests/test_v80_phase4c_consensus_audit.py"
       - ".github/workflows/v80_phase3_source_audit.yml"
@@ -36,7 +35,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check duckdb psycopg[binary] certifi requests
       - name: Compile Python files
         run: |
-          python -m py_compile scripts/v80_phase3_source_audit.py tests/test_v80_phase3_source_audit.py scripts/v80_phase4b_sbr_repair_audit.py tests/test_v80_phase4b_sbr_repair_audit.py
+          python -m py_compile scripts/v80_phase3_source_audit.py tests/test_v80_phase3_source_audit.py scripts/v80_phase4b_sbr_repair_audit.py tests/test_v80_phase4b_sbr_repair_audit.py scripts/v80_phase4c_consensus_audit.py tests/test_v80_phase4c_consensus_audit.py
       - name: Run parser unit tests
         run: python -m unittest discover -s tests -p "test_v80_phase3_source_audit.py" -v
       - name: Run repaired SBR parser unit tests
