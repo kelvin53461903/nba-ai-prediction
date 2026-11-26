@@ -195,6 +195,7 @@ def audit_sbr(games: list[dict]) -> dict:
     game_by_id = {g["game_id"]: g for g in games}
     score_checks = Counter()
     score_mismatches = []
+    score_verified_game_ids = set()
     for candidate, game_id in assigned:
         game = game_by_id[game_id]
         try:
@@ -205,6 +206,7 @@ def audit_sbr(games: list[dict]) -> dict:
             score_checks["checked"] += 1
             if (src_home, src_away) == (db_home, db_away):
                 score_checks["exact_match"] += 1
+                score_verified_game_ids.add(game_id)
             else:
                 score_checks["mismatch"] += 1
                 if len(score_mismatches) < 20:
@@ -228,7 +230,9 @@ def audit_sbr(games: list[dict]) -> dict:
     market_samples = []
     ats_results = Counter()
     total_results = Counter()
-    for candidate, game_id in assigned:
+    verified_assigned = [(candidate, game_id) for candidate, game_id in assigned
+                         if game_id in score_verified_game_ids]
+    for candidate, game_id in verified_assigned:
         src = rows[candidate["source_index"]]
         game = game_by_id[game_id]
         try:
@@ -298,6 +302,8 @@ def audit_sbr(games: list[dict]) -> dict:
     acceptance_reasons = []
     if ml_brier is None or ml_brier > 0.25:
         acceptance_reasons.append("de-vigged moneyline Brier score exceeds 0.25 or is unavailable")
+    if score_checks["exact_match"] == 0 or score_checks["mismatch"] > 0 or score_checks["missing_or_invalid"] > 0:
+        acceptance_reasons.append("not all candidate game matches have exact source-to-database final-score verification")
     if total_over_rate is not None and total_over_rate > 0.70:
         acceptance_reasons.append("over/under settlement is severely imbalanced (>70% over), indicating a likely line-field or parsing problem")
     if total_line_mean is not None and actual_total_mean is not None and abs(total_line_mean - actual_total_mean) > 15:
@@ -354,6 +360,7 @@ def audit_sbr(games: list[dict]) -> dict:
             "roi_eligibility": "moneyline may be evaluated after price validation; spread and total ROI are not eligible without both-side prices and a verified price source",
         },
         "matched_unique_games": len(assigned),
+        "score_verified_market_games": len(verified_assigned),
         "matched_by_season": dict(matched_by_season),
         "score_validation": {
             "counts": dict(score_checks),
