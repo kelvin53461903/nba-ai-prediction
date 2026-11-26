@@ -1,0 +1,74 @@
+name: NBA V8.0 Phase 7 Rolling-Form Model Comparison
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase7_calibration_gate.py"
+      - "tests/test_v80_phase7_calibration_gate.py"
+      - ".github/workflows/v80_phase7_model_comparison.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: nba-v80-phase7-model-comparison
+  cancel-in-progress: false
+
+jobs:
+  compare-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout isolated audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install model dependencies
+        run: python -m pip install --disable-pip-version-check numpy pandas scikit-learn
+
+      - name: Download already-audited Phase 6B dataset from Run 52
+        uses: actions/download-artifact@v4
+        with:
+          name: nba-v80-phase3-source-audit
+          run-id: 45806673683
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts
+
+      - name: Verify Phase 6B input artifact
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("artifacts/v80_phase6b/leak_safe_team_form_dataset.json")
+          assert p.is_file(), f"Missing {p}"
+          d=json.loads(p.read_text())
+          assert d.get("mode")=="LEAK_SAFE_ROLLING_TEAM_FORM_FEATURES"
+          assert len(d.get("rows", []))==7577
+          assert d.get("same_date_results_excluded") is True
+          print("PASS: 7,577-row leak-safe Phase 6B dataset verified")
+          PY
+
+      - name: Compile Phase 7
+        run: python -m py_compile scripts/v80_phase7_calibration_gate.py tests/test_v80_phase7_calibration_gate.py
+
+      - name: Run Phase 7 unit tests
+        run: python -m unittest discover -s tests -p "test_v80_phase7_calibration_gate.py" -v
+
+      - name: Run market-only versus rolling-form comparison
+        run: python scripts/v80_phase7_calibration_gate.py
+
+      - name: Upload Phase 7 model comparison report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-v80-phase7-model-comparison
+          path: artifacts/v80_phase7/
+          if-no-files-found: error
+          retention-days: 30
