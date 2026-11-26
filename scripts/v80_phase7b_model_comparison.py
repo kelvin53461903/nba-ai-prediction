@@ -8,6 +8,7 @@ model selection or calibration. This remains research-only, not a betting ROI te
 from __future__ import annotations
 import json
 from pathlib import Path
+from datetime import datetime
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
@@ -33,6 +34,14 @@ for w in (5,10,20):
 NUM=BASE_NUM+ROLL+DIFF
 SPECS={"spread":("ats_result","HOME_COVER","AWAY_COVER"),
        "total":("total_result","OVER","UNDER")}
+
+def row_has_strict_pre_tip_snapshot(row):
+ try:
+  snap=datetime.fromisoformat(str(row["closing_snapshot"]).replace("Z","+00:00"))
+  tip=datetime.fromisoformat(str(row["commence_time_utc"]).replace("Z","+00:00"))
+ except (KeyError,TypeError,ValueError):
+  return False
+ return snap.tzinfo is not None and tip.tzinfo is not None and snap<tip
 
 def logit(p):
  p=np.clip(np.asarray(p,dtype=float),1e-5,1-1e-5)
@@ -113,15 +122,20 @@ def main():
  OUT.mkdir(parents=True,exist_ok=True)
  if not INPUT.exists(): raise RuntimeError("Missing Phase 6C features")
  obj=json.loads(INPUT.read_text(encoding="utf-8"))
- if obj.get("mode")!="LEAK_SAFE_ROLLING_MARKET_RESIDUAL_AND_ELO" or len(obj.get("rows",[]))!=7577:
-  raise RuntimeError("Phase 6C dataset failed validation")
- df=pd.DataFrame(obj["rows"])
+ source_rows=obj.get("rows",[])
+ if obj.get("mode")!="LEAK_SAFE_ROLLING_MARKET_RESIDUAL_AND_ELO" or len(source_rows)<1000:
+  raise RuntimeError("Phase 6C dataset failed validation or has too few strict pre-tip rows")
+ if obj.get("pre_tip_snapshot_validation")!="PASS":
+  raise RuntimeError("Phase 6C did not attest strict pre-tip snapshot filtering")
+ if not all(row_has_strict_pre_tip_snapshot(r) for r in source_rows):
+  raise RuntimeError("Post-tip or invalid market snapshot found; refusing model comparison")
+ df=pd.DataFrame(source_rows)
  if df.nba_game_id.duplicated().any(): raise RuntimeError("Duplicate game IDs")
  if not set(NUM).issubset(df.columns): raise RuntimeError("Missing engineered features: "+str(sorted(set(NUM)-set(df.columns))))
  markets={m:run_market(df,m) for m in SPECS}
  all_pass=all(v["research_gate"]=="PASS" for v in markets.values())
  report={"phase":"V8.0_PHASE7B","mode":"MARKET_BASELINE_VS_ROLLING_FORM_ATS_TOTAL_ELO_COMPARISON",
-  "dataset_rows":len(df),"split_seasons":{"TRAIN":["2020-21","2021-22","2022-23"],"VALIDATION":["2023-24"],"TEST":["2024-25"],"FINAL_HOLDOUT":["2025-26"]},
+  "dataset_rows":len(df),"source_rows_before_pre_tip_filter":obj.get("source_row_count"),"strict_pre_tip_only":True,"split_seasons":{"TRAIN":["2020-21","2021-22","2022-23"],"VALIDATION":["2023-24"],"TEST":["2024-25"],"FINAL_HOLDOUT":["2025-26"]},
   "markets":markets,"moneyline":{"status":"NOT_AVAILABLE","reason":"No audited moneyline prices in this consensus-line dataset."},
   "roi":{"status":"NOT_CALCULABLE","reason":"No two-way prices."},
   "source_license":"NOASSERTION — legal review required before persistent import or redistribution",
