@@ -40,7 +40,7 @@ jobs:
         run: python -m py_compile v80_market_calibration_backtest.py v80_database.py
       - name: Run 2025-26 held-out calibration benchmark
         env:
-          V80_TEST_DATABASE_URL: ${{ secrets.V80_TEST_DATABASE_URL }}
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
         run: python v80_market_calibration_backtest.py
       - name: Upload market calibration report
         if: always()
