@@ -40,6 +40,11 @@ def main():
  if cross.get("mode")!="READ_ONLY_FULL_SIX_SEASON_EXACT_SCORE_CROSSWALK":
   raise RuntimeError("Unexpected Phase 4G crosswalk report mode")
  if cross.get("scoreboard_query_failures"): raise RuntimeError("Phase 4G scoreboard query failures; refusing dataset build")
+ resolved = cross.get("resolved_rows")
+ if not isinstance(resolved, list) or not resolved:
+  raise RuntimeError("Phase 4G row-level resolved_rows missing/empty; refusing to emit an empty dataset")
+ if len(resolved) != int(cross.get("database_games", -1)):
+  raise RuntimeError("Phase 4G row-level crosswalk count does not match database_games; refusing dataset build")
  parquet=CACHE/"closing_lines_odds_api.parquet"
  if not parquet.exists():
   import requests
@@ -57,7 +62,7 @@ def main():
  db_by_id={str(g["game_id"]):g for g in db}
  if len(db_by_id)!=len(db): raise RuntimeError("Duplicate NBA game IDs in isolated DB")
  rows=[]; counts=Counter(); season_counts=defaultdict(Counter); split_counts=defaultdict(Counter)
- for match in cross.get("resolved_rows",[]):
+ for match in resolved:
   if match.get("status")!="EXACT_SCORE_AND_SOURCE_ID_PRESENT": continue
   nba_id=str(match["nba_game_id"]); event_id=str(match["espn_event_id"])
   g=db_by_id.get(nba_id); line=lines.get(event_id)
@@ -103,8 +108,8 @@ def main():
  report={
   "phase":"V8.0_PHASE5","mode":"READ_ONLY_CHRONOLOGICAL_MARKET_BENCHMARK_DATASET",
   "source_revision":"7be25dae2ebe5f6027f5343a4ab3195caa61aee5",
-  "input_crosswalk_games":len(cross.get("resolved_rows",[])),
-  "input_crosswalk_exact_id_matches":sum(r.get("status")=="EXACT_SCORE_AND_SOURCE_ID_PRESENT" for r in cross.get("resolved_rows",[])),
+  "input_crosswalk_games":len(resolved),
+  "input_crosswalk_exact_id_matches":sum(r.get("status")=="EXACT_SCORE_AND_SOURCE_ID_PRESENT" for r in resolved),
   "dataset_rows":len(rows),"row_counts":dict(counts),
   "by_split":{k:dict(v) for k,v in split_counts.items()},
   "by_season":{k:dict(v) for k,v in season_counts.items()},
@@ -114,7 +119,7 @@ def main():
   "price_availability":{"two_way_spread_prices":False,"two_way_total_prices":False,"moneyline_prices":False,"roi_calculable":False,"clv_calculable":False},
   "source_license":"NOASSERTION — no persistent import or redistribution until legal clearance",
   "database_writes":0,
-  "acceptance":"DATASET_CANDIDATE_FOR_BENCHMARK_ONLY" if rows and not counts["JOIN_INTEGRITY_FAILURE"] and not counts["SCORE_RECHECK_FAILURE"] else "REJECTED"
+  "acceptance":"DATASET_CANDIDATE_FOR_BENCHMARK_ONLY" if rows and not counts["JOIN_INTEGRITY_FAILURE"] and not counts["SCORE_RECHECK_FAILURE"] and len(rows)==counts["INCLUDED"] else "REJECTED"
  }
  (OUT/"market_benchmark_dataset.json").write_text(json.dumps({"report":report,"rows":rows},indent=2,default=str),encoding="utf-8")
  # CSV for inspection/analysis; output is ephemeral workflow artifact only.
