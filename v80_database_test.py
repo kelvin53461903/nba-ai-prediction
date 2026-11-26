@@ -225,12 +225,12 @@ def run_tests():
 
             tables = cur.fetchall()
 
+            actual_tables = {row["table_name"] for row in tables}
+            print("DIAGNOSTIC: expected public tables =", sorted(EXPECTED_TABLES))
+            print("DIAGNOSTIC: actual public tables =", sorted(actual_tables))
             check(
-                "17 - All ten expected tables",
-                {
-                    row["table_name"]
-                    for row in tables
-                } == EXPECTED_TABLES,
+                "17 - All eleven expected tables",
+                actual_tables == EXPECTED_TABLES,
             )
 
             check(
@@ -442,7 +442,7 @@ if __name__ == "__main__":
         run_tests()
     except Exception as exc:
         print("=" * 50)
-        print(f"RESULT: {len(passed)}/26 TESTS PASSED")
+        print(f"RESULT: {len(passed)}/29 TESTS PASSED")
         print("V8.0 DATABASE TEST FAILED")
 
         # Only print controlled test names.
