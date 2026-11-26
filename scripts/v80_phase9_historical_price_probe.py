@@ -15,10 +15,10 @@ import requests
 
 BASE="https://api.the-odds-api.com/v4/historical/sports/basketball_nba"
 SAMPLES=[
- "2021-02-01T17:00:00Z",
- "2023-02-01T17:00:00Z",
- "2025-02-01T17:00:00Z",
- "2026-02-01T17:00:00Z",
+ "2021-02-02T00:10:00Z",
+ "2023-02-01T23:40:00Z",
+ "2025-02-01T21:40:00Z",
+ "2026-02-01T20:10:00Z",
 ]
 OUT=Path("artifacts/v80_phase9")
 TIMEOUT=25
@@ -87,7 +87,7 @@ def run_probe(api_key,session=None):
   item["credits_remaining_after_markets"]=market_resp.get("credits_remaining")
   if market_resp["ok"]:
    summary=summarize_markets(market_resp["data"])
-   item["market_coverage_response_shape"]={"type":type(market_resp["data"]).__name__, "keys":sorted(market_resp["data"].keys()) if isinstance(market_resp["data"],dict) else [], "data_type":type(market_resp["data"].get("data")).__name__ if isinstance(market_resp["data"],dict) else None}
+   item["market_coverage_response_shape"]={"type":type(market_resp["data"]).__name__, "keys":sorted(market_resp["data"].keys()) if isinstance(market_resp["data"],dict) else [], "inner_data_keys":sorted(market_resp["data"].get("data",{}).keys()) if isinstance(market_resp["data"],dict) and isinstance(market_resp["data"].get("data"),dict) else [], "data_type":type(market_resp["data"].get("data")).__name__ if isinstance(market_resp["data"],dict) else None}
    item["market_coverage"]=summary
    item["coverage_status"]="MARKET_KEYS_AVAILABLE" if summary["market_keys_union"] else "NO_MARKET_KEYS"
   else:
