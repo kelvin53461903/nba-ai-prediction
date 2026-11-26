@@ -1,0 +1,52 @@
+name: NBA V8.0 Extend Historical Games 2020-2024
+
+on:
+  push:
+    branches:
+      - v8.0-calibration-test
+    paths:
+      - 'collect_v80_early_season_games.py'
+      - 'collect_bdl_historical_games.py'
+      - '.github/workflows/v80-early-season-games.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v80-early-season-games
+  cancel-in-progress: false
+
+jobs:
+  collect-early-seasons:
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    environment: v80-calibration-test
+    steps:
+      - name: Checkout isolated V8.0 test branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install API collection dependency
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'requests>=2.32,<3'
+      - name: Compile historical collector
+        run: python -m py_compile collect_v80_early_season_games.py collect_bdl_historical_games.py
+      - name: Collect 2020-21 through 2023-24 regular season and playoff results
+        env:
+          BDL_API_KEY: ${{ secrets.BDL_API_KEY }}
+        run: python collect_v80_early_season_games.py
+      - name: Upload historical games for audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v80-early-season-games-2020-2024
+          path: data/nba_v80_historical_games_2020_2023.csv
+          if-no-files-found: warn
+          retention-days: 30
