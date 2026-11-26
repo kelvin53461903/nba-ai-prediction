@@ -2,6 +2,13 @@ name: NBA V8.0 Phase 7C CC-BY Market Model Research
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase7c_ccby_market_research.py"
+      - "tests/test_v80_phase7c_ccby_market_research.py"
+      - ".github/workflows/v80_phase7c_ccby_market_research.yml"
   push:
     branches:
       - v8.0-phase2-historical-market-audit
