@@ -55,7 +55,7 @@ class SBRRepairAuditTests(unittest.TestCase):
         self.assertEqual(module.sbr_date({"season": 2019, "date": 20190830.0}).isoformat(), "2020-08-30")
 
     def test_american_odds_devig(self):
-        self.assertAlmostEqual(module.devig(-150, 130), 0.5660377358490566)
+        self.assertAlmostEqual(module.devig(-150, 130), 0.5798319327731092)
 
 
 if __name__ == "__main__":
