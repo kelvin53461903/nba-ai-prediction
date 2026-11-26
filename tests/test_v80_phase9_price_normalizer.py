@@ -30,10 +30,13 @@ class PriceNormalizerTests(unittest.TestCase):
   b={**BOOK,"markets":[{"key":"h2h","outcomes":[{"name":"Boston Celtics","price":1.65},{"name":"Milwaukee Bucks","price":1.0}]}]}
   self.assertEqual(m.normalize_bookmaker_event(EVENT,b,"t"),[])
  def test_wrapped_response_schema(self):
-  rows=m.normalize_historical_response({"timestamp":"2025-02-01T21:35:00Z","data":{**EVENT,"bookmakers":[BOOK]}})
+  rows=m.normalize_historical_response({"timestamp":"2025-02-01T21:35:00Z","data":{**EVENT,"commence_time":"2025-02-02T00:00:00Z","bookmakers":[BOOK]}})
   self.assertEqual(len(rows),3)
+  self.assertTrue(all(row["provider"]=="the-odds-api" for row in rows))
+  self.assertTrue(all(row["sport_key"]=="basketball_nba" for row in rows))
+  self.assertTrue(all(row["commence_time"]=="2025-02-02T00:00:00Z" for row in rows))
  def test_rejects_missing_snapshot_timestamp(self):
-  with self.assertRaises(ValueError): m.normalize_historical_response({"data":{**EVENT,"bookmakers":[BOOK]}})
+  with self.assertRaises(ValueError): m.normalize_historical_response({"data":{**EVENT,"commence_time":"2025-02-02T00:00:00Z","bookmakers":[BOOK]}})
 
  def test_never_combines_sides_across_bookmakers(self):
   partial_home={"key":"book-home","markets":[{"key":"h2h","outcomes":[{"name":"Boston Celtics","price":1.65}]}]}
@@ -43,7 +46,7 @@ class PriceNormalizerTests(unittest.TestCase):
  def test_rejects_missing_event_identity(self):
   self.assertEqual(m.normalize_bookmaker_event({"id":"evt1","home_team":"Boston Celtics"},BOOK,"t"),[])
  def test_rejects_malformed_wrapped_response(self):
-  with self.assertRaises(ValueError): m.normalize_historical_response({"timestamp":"t","data":[]})
+  with self.assertRaises(ValueError): m.normalize_historical_response({"timestamp":"2025-02-01T21:35:00Z","data":[]})
  def test_no_vig_probabilities_sum_to_one(self):
   rows=m.normalize_bookmaker_event(EVENT,BOOK,"2025-02-01T21:35:00Z")
   for row in rows:
@@ -51,4 +54,15 @@ class PriceNormalizerTests(unittest.TestCase):
     self.assertAlmostEqual(row["over_no_vig_probability"]+row["under_no_vig_probability"],1.0)
    else:
     self.assertAlmostEqual(row["home_no_vig_probability"]+row["away_no_vig_probability"],1.0)
+
+ def test_rejects_timezone_naive_snapshot(self):
+  with self.assertRaises(ValueError):
+   m.normalize_historical_response({"timestamp":"2025-02-01T21:35:00","data":{**EVENT,"commence_time":"2025-02-02T00:00:00Z","bookmakers":[BOOK]}})
+ def test_rejects_timezone_naive_tipoff(self):
+  with self.assertRaises(ValueError):
+   m.normalize_historical_response({"timestamp":"2025-02-01T21:35:00Z","data":{**EVENT,"commence_time":"2025-02-02T00:00:00","bookmakers":[BOOK]}})
+ def test_rejects_missing_event_id(self):
+  event={**EVENT,"id":None,"commence_time":"2025-02-02T00:00:00Z","bookmakers":[BOOK]}
+  with self.assertRaises(ValueError):
+   m.normalize_historical_response({"timestamp":"2025-02-01T21:35:00Z","data":event})
 if __name__=="__main__":unittest.main()
