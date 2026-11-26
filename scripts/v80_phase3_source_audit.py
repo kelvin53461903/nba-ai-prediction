@@ -224,7 +224,7 @@ def audit_sbr(games: list[dict]) -> dict:
         "assignment_collisions": collisions,
         "unknown_team_rows": sum(unknown_teams.values()),
         "unknown_team_examples": [{"teams":list(k),"rows":v} for k,v in unknown_teams.most_common(10)],
-        "invalid_date_rows": invalid_dates,\n        "score_validation": "not yet performed; source score fields are captured in sample rows for schema review",
+        "invalid_date_rows": invalid_dates,
         "sample_matches": [{"source_date":c["date"],"home":c["home"],"away":c["away"],"game_id":gid,"day_delta":c["best_day_delta"]} for c,gid in assigned[:12]],
     }
     return result
