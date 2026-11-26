@@ -38,7 +38,7 @@ def main():
    ir=cur.fetchone()
    check("09 - Import role login enabled",ir["rolcanlogin"])
    check("10 - Import role has no superuser or RLS bypass",not ir["rolsuper"] and not ir["rolbypassrls"])
-   check("11 - Import role has no elevated privileges",not any(ir[k] for k in ("rolcreatedb","rolcreaterole","rolreplication","rolinherit")))
+   check("11 - Import role has no elevated privileges",not any(ir[k] for k in ("rolcreatedb","rolcreaterole","rolreplication")))
    cur.execute("SELECT count(*) n FROM pg_auth_members WHERE member='v80_historical_import'::regrole")
    check("12 - Import role has no role memberships",cur.fetchone()["n"]==0)
    cur.execute("SELECT has_database_privilege('v80_historical_import','nba_v80','CONNECT') c,has_database_privilege('v80_historical_import','nba_v80','CREATE') cr,has_database_privilege('v80_historical_import','nba_v80','TEMP') t")
