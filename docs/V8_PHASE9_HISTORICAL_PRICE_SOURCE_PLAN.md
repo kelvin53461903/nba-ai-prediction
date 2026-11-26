@@ -96,3 +96,28 @@ This confirms that the free coverage endpoints can discover historical NBA event
 ## Next dependency
 
 The provider's historical odds prices endpoint is paid-plan only and the documented usage cost is 10 credits per returned market per region. A single event request returning all three featured markets in one region can therefore cost up to 30 credits. No paid request should be made until the account's historical-odds entitlement and subscription cost are confirmed and the user explicitly approves a paid sample. The current workflow remains coverage-only.
+
+
+## Six-season free coverage scan (2026-11-26)
+
+The expanded workflow sampled one representative historical snapshot in each of six NBA seasons. All six historical events requests and all six historical event-markets requests succeeded. The workflow used the free coverage endpoints only; no historical odds prices were downloaded and no paid endpoint was called.
+
+| Season represented | Snapshot UTC | Events at snapshot | Sampled-event bookmakers | h2h books | Spread books | Total books | Books with all three |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 2020-21 | 2021-01-15 00:10 | 5 | 15 | 15 | 11 | 12 | 10 |
+| 2021-22 | 2022-01-15 00:10 | 18 | 18 | 17 | 16 | 16 | 15 |
+| 2022-23 | 2023-01-15 00:10 | 12 | 20 | 20 | 19 | 19 | 19 |
+| 2023-24 | 2024-01-15 00:10 | 13 | 10 | 6 | 10 | 10 | 6 |
+| 2024-25 | 2025-01-15 00:10 | 13 | 9 | 9 | 9 | 9 | 9 |
+| 2025-26 | 2026-01-15 00:10 | 14 | 11 | 11 | 11 | 10 | 10 |
+
+The six-snapshot coverage run passed (GitHub Actions run 45810678047). The sampled event-market response showed at least one bookmaker with all three featured markets at every sampled season. This is evidence of sampled market-key coverage only, not a season-wide completeness guarantee or price-history entitlement.
+
+The response reported 335 requests remaining after the final sample (API account quota metadata). This probe used only historical events and event-markets coverage requests; no paid historical odds snapshots were requested.
+
+## Decision after Phase 9 coverage
+
+- The no-cost discovery gate is complete for one sampled event in each of six seasons.
+- The next no-cost engineering step is to expand fixture-based integration tests and preserve a canonical price-snapshot schema; the paid price endpoint remains disabled.
+- Before any paid historical odds sample, confirm the account plan and exact cost with the provider, then obtain explicit approval for the proposed request count and market/region scope.
+- Do not call a paid endpoint merely because a user says "go" after a warning that the next action incurs charges; explicit paid-cost approval is required.
