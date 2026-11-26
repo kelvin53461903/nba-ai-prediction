@@ -9,6 +9,7 @@ on:
       - "scripts/v80_phase3_source_audit.py"
       - "tests/test_v80_phase3_source_audit.py"
       - "scripts/v80_phase4b_sbr_repair_audit.py"
+      - "tests/test_v80_phase4b_sbr_repair_audit.py"
       - "scripts/v80_phase4c_consensus_audit.py"
       - "tests/test_v80_phase4c_consensus_audit.py"
       - ".github/workflows/v80_phase3_source_audit.yml"
