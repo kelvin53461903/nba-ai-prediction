@@ -18,9 +18,9 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score,brier_score_loss,log_loss,roc_auc_score
 
-INPUT=Path("artifacts/v80_phase5/market_benchmark_dataset.json")
+INPUT=Path("artifacts/v80_phase6b/leak_safe_team_form_dataset.json")
 OUT=Path("artifacts/v80_phase7")
-NUM=["home_point","over_under","bookmaker_count","home_favorite"]
+NUM=["home_point","over_under","bookmaker_count","home_favorite",\n "home_prev_win_rate","home_prev_points_for_avg","home_prev_points_against_avg","home_prev_net_points_avg","home_prev_rest_days",\n "away_prev_win_rate","away_prev_points_for_avg","away_prev_points_against_avg","away_prev_net_points_avg","away_prev_rest_days",\n "pregame_net_form_diff","pregame_win_rate_diff","pregame_rest_diff"]
 CAT=["home_team","away_team"]
 SPECS={"spread":("ats_result","HOME_COVER","AWAY_COVER"),
        "total":("total_result","OVER","UNDER")}
@@ -95,17 +95,17 @@ def main():
  df=pd.DataFrame(obj["rows"])
  if df.nba_game_id.duplicated().any(): raise RuntimeError("Duplicate NBA game IDs")
  markets={m:run_market(df,m) for m in SPECS}
- source_license=obj["report"].get("source_license","UNKNOWN")
+ source_license="NOASSERTION — legal review required before persistent import or redistribution"
  license_clear=source_license=="CLEARED"
  all_pass=all(v["research_gate"]=="PASS" for v in markets.values())
  report={"phase":"V8.0_PHASE7","mode":"CALIBRATION_AND_RELEASE_RISK_ASSESSMENT",
   "markets":markets,"moneyline":{"status":"NOT_AVAILABLE","reason":"No audited moneyline odds/labels."},
   "roi":{"status":"NOT_CALCULABLE","reason":"No two-way prices."},
-  "source_license":source_license,"source_license_cleared":license_clear,
+  "source_license":source_license,"source_license_cleared":False,
   "database_writes":0,
   "overall_research_gate":"PASS" if all_pass else "FAIL",
-  "production_release_approved":bool(all_pass and license_clear),
-  "release_decision":"NOT_APPROVED" if not (all_pass and license_clear) else "ELIGIBLE_FOR_INDEPENDENT_REVIEW",
+  "production_release_approved":False,
+  "release_decision":"NOT_APPROVED — source licensing unresolved and independent review required",
   "limitations":["No two-way prices; ROI and vig-adjusted edge cannot be measured.",
    "Closing consensus lines are market information, not independent odds prices.",
    "One validation, one test, and one final holdout season.",
