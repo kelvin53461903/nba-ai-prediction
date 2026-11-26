@@ -193,6 +193,12 @@ def audit_sbr(games: list[dict]) -> dict:
     # Calculate closing-market baselines only on matched, score-verified rows.
     market_counts = Counter()
     ml_probs = []
+    home_ml_values = []
+    away_ml_values = []
+    spread_values = []
+    total_line_values = []
+    actual_total_values = []
+    market_samples = []
     ats_results = Counter()
     total_results = Counter()
     for candidate, game_id in assigned:
@@ -207,6 +213,8 @@ def audit_sbr(games: list[dict]) -> dict:
                 ph = hp / (hp + ap)
                 actual_home = 1.0 if game["home_score"] > game["away_score"] else 0.0
                 ml_probs.append((ph, actual_home))
+                home_ml_values.append(hml)
+                away_ml_values.append(aml)
                 market_counts["valid_moneyline_pairs"] += 1
         except (TypeError, ValueError, ZeroDivisionError):
             market_counts["invalid_moneyline_pairs"] += 1
@@ -214,6 +222,7 @@ def audit_sbr(games: list[dict]) -> dict:
             spread = float(src.get("home_close_spread"))
             if spread != 0 and abs(spread) <= 40:
                 margin_adjusted = float(game["home_score"]) - float(game["away_score"]) + spread
+                spread_values.append(spread)
                 ats_results["home_cover" if margin_adjusted > 0 else "away_cover" if margin_adjusted < 0 else "push"] += 1
             else:
                 market_counts["invalid_or_missing_spread_line"] += 1
@@ -223,11 +232,33 @@ def audit_sbr(games: list[dict]) -> dict:
             total_line = float(src.get("close_over_under"))
             if 150 <= total_line <= 300:
                 final_total = float(game["home_score"]) + float(game["away_score"])
+                total_line_values.append(total_line)
+                actual_total_values.append(final_total)
                 total_results["over" if final_total > total_line else "under" if final_total < total_line else "push"] += 1
             else:
                 market_counts["invalid_or_missing_total_line"] += 1
         except (TypeError, ValueError):
             market_counts["invalid_or_missing_total_line"] += 1
+        if len(market_samples) < 20:
+            market_samples.append({
+                "game_id": game_id,
+                "season": candidate["season"],
+                "home": candidate["home"],
+                "away": candidate["away"],
+                "home_close_ml": src.get("home_close_ml"),
+                "away_close_ml": src.get("away_close_ml"),
+                "home_close_spread": src.get("home_close_spread"),
+                "close_over_under": src.get("close_over_under"),
+                "home_score": game["home_score"],
+                "away_score": game["away_score"],
+            })
+    def numeric_summary(values):
+        ordered = sorted(values)
+        if not ordered:
+            return {"n": 0}
+        mid = len(ordered) // 2
+        median = ordered[mid] if len(ordered) % 2 else (ordered[mid-1] + ordered[mid]) / 2
+        return {"n": len(ordered), "min": round(ordered[0], 3), "median": round(median, 3), "max": round(ordered[-1], 3), "mean": round(sum(ordered)/len(ordered), 3)}
     if ml_probs:
         ml_accuracy = sum((p >= 0.5) == bool(y) for p, y in ml_probs) / len(ml_probs)
         ml_brier = sum((p - y) ** 2 for p, y in ml_probs) / len(ml_probs)
@@ -240,9 +271,15 @@ def audit_sbr(games: list[dict]) -> dict:
             "accuracy": round(ml_accuracy, 6) if ml_accuracy is not None else None,
             "brier_score": round(ml_brier, 6) if ml_brier is not None else None,
             "method": "American closing moneylines converted to implied probabilities and two-way de-vigged",
+            "home_price_distribution": numeric_summary(home_ml_values),
+            "away_price_distribution": numeric_summary(away_ml_values),
         },
         "spread_line_settlement_counts": dict(ats_results),
+        "spread_line_distribution": numeric_summary(spread_values),
         "total_line_settlement_counts": dict(total_results),
+        "total_line_distribution": numeric_summary(total_line_values),
+        "actual_game_total_distribution_for_valid_total_lines": numeric_summary(actual_total_values),
+        "market_sample_rows": market_samples,
         "quality_counts": dict(market_counts),
         "roi_note": "Spread and total settlement labels have no matching both-side prices in this source; no ROI is calculated.",
     }
