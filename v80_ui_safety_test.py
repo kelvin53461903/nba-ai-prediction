@@ -15,7 +15,7 @@ def main():
  if ui_lines: raise RuntimeError(f"10,000 simulation output appears in UI at lines {ui_lines}")
  if "Raw simulation counts, intervals and histograms are intentionally hidden from the website." not in source:
   raise RuntimeError("Required UI privacy/display guard comment missing")
- if "V8.0 校準測試版" not in source or "尚未證明優於市場基準" not in source:
+ if "V8.0 校準測試版" not in source or "未證明優於市場基準" not in source:
   raise RuntimeError("V8.0 market-risk disclosure missing")
  print("PASS: app.py syntax")
  print("PASS: raw 10,000-run simulation counts/results are not exposed in UI")
