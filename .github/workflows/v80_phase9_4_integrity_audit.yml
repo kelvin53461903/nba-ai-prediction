@@ -37,7 +37,14 @@ jobs:
           from pathlib import Path
           source=Path("scripts/v80_phase9_4_integrity_audit.py").read_text()
           tree=ast.parse(source)
-          calls=[n for n in ast.walk(tree) if isinstance(n,ast.Call)]
-          assert not any(isinstance(n.func,ast.Attribute) and n.func.attr in {"get","post","request"} for n in calls)
-          print("PASS: offline audit contains no HTTP request calls")
+          forbidden_imports={"requests","httpx","aiohttp","urllib","socket"}
+          imported=set()
+          for node in ast.walk(tree):
+              if isinstance(node,ast.Import):
+                  imported.update(alias.name.split(".")[0] for alias in node.names)
+              elif isinstance(node,ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".")[0])
+          assert not (imported & forbidden_imports), f"Network-capable imports found: {imported & forbidden_imports}"
+          assert "THE_ODDS_API_KEY" not in source
+          print("PASS: offline audit has no network imports or odds API key dependency")
           PY
