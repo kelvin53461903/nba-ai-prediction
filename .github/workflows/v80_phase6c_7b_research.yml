@@ -1,0 +1,82 @@
+name: NBA V8.0 Phase 6C and 7B Advanced Market Model Research
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase6c_market_elo_features.py"
+      - "tests/test_v80_phase6c_market_elo_features.py"
+      - "scripts/v80_phase7b_model_comparison.py"
+      - "tests/test_v80_phase7b_model_comparison.py"
+      - ".github/workflows/v80_phase6c_7b_research.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: nba-v80-phase6c-7b-research
+  cancel-in-progress: false
+
+jobs:
+  advanced-market-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout isolated audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install research dependencies
+        run: python -m pip install --disable-pip-version-check numpy pandas scikit-learn
+
+      - name: Download audited Phase 5 dataset from Run 52
+        uses: actions/download-artifact@v4
+        with:
+          name: nba-v80-phase3-source-audit
+          run-id: 45806673683
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts
+
+      - name: Verify source dataset
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("artifacts/v80_phase5/market_benchmark_dataset.json")
+          d=json.loads(p.read_text())
+          assert len(d.get("rows",[]))==7577
+          assert d.get("report",{}).get("acceptance")=="DATASET_CANDIDATE_FOR_BENCHMARK_ONLY"
+          print("PASS: 7,577-row Phase 5 dataset verified")
+          PY
+
+      - name: Compile Phase 6C and Phase 7B
+        run: python -m py_compile scripts/v80_phase6c_market_elo_features.py scripts/v80_phase7b_model_comparison.py tests/test_v80_phase6c_market_elo_features.py tests/test_v80_phase7b_model_comparison.py
+
+      - name: Run Phase 6C feature tests
+        run: python -m unittest discover -s tests -p "test_v80_phase6c_market_elo_features.py" -v
+
+      - name: Build leak-safe rolling market and Elo features
+        run: python scripts/v80_phase6c_market_elo_features.py
+
+      - name: Run Phase 7B model comparison tests
+        run: python -m unittest discover -s tests -p "test_v80_phase7b_model_comparison.py" -v
+
+      - name: Compare market baseline against richer rolling model
+        run: python scripts/v80_phase7b_model_comparison.py
+
+      - name: Upload Phase 6C and 7B research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-v80-phase6c-7b-research
+          path: |
+            artifacts/v80_phase6c/
+            artifacts/v80_phase7b/
+          if-no-files-found: error
+          retention-days: 30
