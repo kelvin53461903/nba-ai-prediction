@@ -19,7 +19,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: v80-early-season-games
+  group: v80-early-season-artifact-validation
   cancel-in-progress: false
 
 jobs:
