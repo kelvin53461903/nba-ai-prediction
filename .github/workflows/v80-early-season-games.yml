@@ -8,6 +8,9 @@ on:
       - 'collect_v80_early_season_games.py'
       - 'collect_bdl_historical_games.py'
       - 'validate_v80_early_season_games.py'
+      - 'import_v80_early_season_games.py'
+      - 'v80_multi_season_walkforward.py'
+      - 'v80_recent_form_backtest.py'
       - '.github/workflows/v80-early-season-games.yml'
   workflow_dispatch:
 
@@ -22,7 +25,7 @@ jobs:
   collect-early-seasons:
     if: github.ref == 'refs/heads/v8.0-calibration-test'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
     environment: v80-calibration-test
     steps:
       - name: Checkout isolated V8.0 test branch
@@ -59,6 +62,12 @@ jobs:
           CONFIRM_EARLY_SEASON_IMPORT: YES
           IMPORT_MODE: commit
         run: python import_v80_early_season_games.py
+      - name: Compile multi-season walk-forward backtest
+        run: python -m py_compile v80_multi_season_walkforward.py v80_recent_form_backtest.py
+      - name: Run expanding-window six-season walk-forward test
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python v80_multi_season_walkforward.py
       - name: Upload historical games and validation report
         if: always()
         uses: actions/upload-artifact@v4
@@ -67,5 +76,6 @@ jobs:
           path: |
             data/nba_v80_historical_games_2020_2023.csv
             v80_early_seasons_validation.json
+            v80_multi_season_walkforward.json
           if-no-files-found: warn
           retention-days: 30
