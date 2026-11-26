@@ -5,8 +5,7 @@ on:
     branches:
       - v8.0-calibration-test
     paths:
-      - 'collect_v80_early_season_games.py'
-      - 'collect_bdl_historical_games.py'
+      - 'normalize_v80_early_season_types.py'
       - 'validate_v80_early_season_games.py'
       - 'import_v80_early_season_games.py'
       - 'v80_multi_season_walkforward.py'
@@ -16,16 +15,17 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: v80-early-season-games
   cancel-in-progress: false
 
 jobs:
-  collect-early-seasons:
+  validate-import-backtest:
     if: github.ref == 'refs/heads/v8.0-calibration-test'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 35
     environment: v80-calibration-test
     steps:
       - name: Checkout isolated V8.0 test branch
@@ -36,24 +36,26 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Install API collection dependency
+      - name: Download previously collected 2020-24 historical CSV artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: v80-early-season-games-2020-2024
+          repository: ${{ github.repository }}
+          run-id: 45752300873
+          github-token: ${{ github.token }}
+          path: .
+      - name: Compile and normalize season labels
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install 'requests>=2.32,<3'
-      - name: Compile historical collector
-        run: python -m py_compile collect_v80_early_season_games.py collect_bdl_historical_games.py
-      - name: Collect 2020-21 through 2023-24 regular season and playoff results
-        env:
-          BDL_API_KEY: ${{ secrets.BDL_API_KEY }}
-        run: python collect_v80_early_season_games.py
-      - name: Validate expanded historical CSV
+          python -m py_compile normalize_v80_early_season_types.py validate_v80_early_season_games.py
+          python normalize_v80_early_season_types.py
+      - name: Validate full historical CSV and official season coverage
         run: python validate_v80_early_season_games.py
-      - name: Install secure Neon importer dependencies
+      - name: Install secure Neon import and backtest dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install 'psycopg[binary]>=3.2,<4' certifi
-      - name: Compile isolated database importer
-        run: python -m py_compile import_v80_early_season_games.py
+      - name: Compile isolated database importer and walk-forward backtest
+        run: python -m py_compile import_v80_early_season_games.py v80_multi_season_walkforward.py v80_recent_form_backtest.py
       - name: Dry-run expanded historical import
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
@@ -66,15 +68,13 @@ jobs:
           CONFIRM_EARLY_SEASON_IMPORT: YES
           IMPORT_MODE: commit
         run: python import_v80_early_season_games.py
-      - name: Compile multi-season walk-forward backtest
-        run: python -m py_compile v80_multi_season_walkforward.py v80_recent_form_backtest.py
       - name: Run expanding-window six-season walk-forward test
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
         run: python v80_multi_season_walkforward.py
-      - name: Upload historical games and validation report
+      - name: Upload normalized data and walk-forward report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: v80-early-season-games-2020-2024
           path: |
