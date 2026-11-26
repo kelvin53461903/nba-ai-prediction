@@ -8,6 +8,7 @@ on:
       - '.github/workflows/v80-market-closes-import.yml'
       - 'import_v80_historical_market_closes.py'
       - 'data/nba_v80_historical_games_cutoff_2026-04-01.csv'
+      - 'data/V80_MARKET_IMPORT_APPROVED.txt'
   workflow_dispatch:
     inputs:
       import_mode:
@@ -56,5 +57,5 @@ jobs:
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
           CONFIRM_MARKET_IMPORT: ${{ (github.event_name == 'push' || inputs.confirm_import == true) && 'YES' || 'NO' }}
-          IMPORT_MODE: ${{ github.event_name == 'push' && 'dry-run' || inputs.import_mode }}
+          IMPORT_MODE: ${{ github.event_name == 'push' && github.event.head_commit.message == 'AUTHORIZE V8.0 MARKET IMPORT' && 'commit' || github.event_name == 'push' && 'dry-run' || inputs.import_mode }}
         run: python import_v80_historical_market_closes.py
