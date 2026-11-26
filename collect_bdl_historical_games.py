@@ -80,29 +80,27 @@ def fetch_season(session, year, min_interval, max_pages):
             commence = parse_datetime(game)
             if commence >= dt.datetime.now(dt.timezone.utc):
                 continue
-            raw_type = str(game.get("season_type") or "").strip().lower()
-            type_map = {"regular": "Regular Season", "regular season": "Regular Season",
-                        "playoffs": "Playoffs", "playoff": "Playoffs"}
-            if raw_type:
-                season_type = type_map.get(raw_type)
-                if season_type not in {"Regular Season", "Playoffs"}:
-                    continue
+            season_windows = {
+                2020: ("2020-12-22", "2021-05-16", "2021-07-21"),
+                2021: ("2021-10-19", "2022-04-10", "2022-06-16"),
+                2022: ("2022-10-18", "2023-04-09", "2023-06-12"),
+                2023: ("2023-10-24", "2024-04-14", "2024-06-17"),
+            }
+            # NBA schedule dates are local to the arena; use Eastern time for the official season calendar.
+            game_day = commence.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+            start_day, regular_end_day, end_day = season_windows[year]
+            if not (start_day <= game_day <= end_day):
+                continue
+            if year == 2023 and game_day == "2023-12-09" and {home.get("full_name"), away.get("full_name")} == {"Los Angeles Lakers", "Indiana Pacers"}:
+                season_type = "In-Season Tournament Final"
             else:
-                # BALLDONTLIE's games endpoint may expose only a postseason boolean.
-                # Apply official season calendar bounds so preseason is never mislabeled regular season.
-                season_windows = {
-                    2020: ("2020-12-22", "2021-05-16", "2021-07-21"),
-                    2021: ("2021-10-19", "2022-04-10", "2022-06-16"),
-                    2022: ("2022-10-18", "2023-04-09", "2023-06-12"),
-                    2023: ("2023-10-24", "2024-04-14", "2024-06-17"),
-                }
-                # NBA schedule dates are local to the arena; use Eastern time for the official season calendar.
-                game_day = commence.astimezone(ZoneInfo("America/New_York")).date().isoformat()
-                start_day, regular_end_day, end_day = season_windows[year]
-                if not (start_day <= game_day <= end_day):
-                    continue
-                if year == 2023 and game_day == "2023-12-09" and {home.get("full_name"), away.get("full_name")} == {"Los Angeles Lakers", "Indiana Pacers"}:
-                    season_type = "In-Season Tournament Final"
+                raw_type = str(game.get("season_type") or "").strip().lower()
+                type_map = {"regular": "Regular Season", "regular season": "Regular Season",
+                            "playoffs": "Playoffs", "playoff": "Playoffs"}
+                if raw_type:
+                    season_type = type_map.get(raw_type)
+                    if season_type not in {"Regular Season", "Playoffs"}:
+                        continue
                 else:
                     season_type = "Regular Season" if game_day <= regular_end_day else "Playoffs"
             rows.append({
