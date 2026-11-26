@@ -70,7 +70,7 @@ jobs:
           fi
           echo "PASS: V80 database secret available"
 
-      - name: Run 26 database integration tests
+      - name: Run 29 database integration and least-privilege tests
         env:
           V80_TEST_DATABASE_URL: ${{ secrets.V80_TEST_DATABASE_URL }}
         run: |
