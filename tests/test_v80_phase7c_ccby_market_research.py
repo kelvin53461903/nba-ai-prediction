@@ -14,4 +14,7 @@ class Phase7CTests(unittest.TestCase):
   self.assertEqual(x["n"],4); self.assertLessEqual(x["brier"],1)
  def test_split_requires_both_seasons(self):
   with self.assertRaises(RuntimeError): m.assign_splits([{"_season":"2024-25","_tip":m.parse_utc("2025-01-01T00:00:00Z")}])
+ def test_all_three_markets_have_probability_fields(self):
+  self.assertEqual(set(m.MARKETS),{"moneyline","spread","totals"})
+  self.assertEqual({v[3] for v in m.MARKETS.values()},{"close_home_win_prob","close_home_cover_prob","close_over_prob"})
 if __name__=="__main__": unittest.main()
