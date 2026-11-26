@@ -8,6 +8,11 @@ on:
       - "app.py"
       - "v80_market_integration.py"
       - "tests/test_v80_market_integration.py"
+      - "scripts/v80_phase9_4_integrity_audit.py"
+      - "scripts/v80_phase9_price_normalizer.py"
+      - "tests/test_v80_phase9_4_integrity_audit.py"
+      - "tests/test_v80_phase9_normalizer_audit_contract.py"
+      - "tests/test_v80_phase9_price_normalizer.py"
       - ".github/workflows/v80_phase8_integration.yml"
   pull_request:
     branches:
@@ -40,10 +45,16 @@ jobs:
           python-version: "3.11"
 
       - name: Compile application and integration module
-        run: python -m py_compile app.py v80_market_integration.py tests/test_v80_market_integration.py
+        run: python -m py_compile app.py v80_market_integration.py scripts/v80_phase9_4_integrity_audit.py scripts/v80_phase9_price_normalizer.py tests/test_v80_market_integration.py tests/test_v80_phase9_4_integrity_audit.py tests/test_v80_phase9_normalizer_audit_contract.py tests/test_v80_phase9_price_normalizer.py
 
       - name: Run fail-closed release gate tests
         run: python -m unittest discover -s tests -p "test_v80_market_integration.py" -v
+
+      - name: Run offline historical quote integrity contract
+        run: |
+          python -m unittest discover -s tests -p "test_v80_phase9_4_integrity_audit.py" -v
+          python -m unittest discover -s tests -p "test_v80_phase9_normalizer_audit_contract.py" -v
+          python -m unittest discover -s tests -p "test_v80_phase9_price_normalizer.py" -v
 
       - name: Verify V8.0 markets default to disabled
         run: |
