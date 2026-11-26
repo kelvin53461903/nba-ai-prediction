@@ -4,6 +4,7 @@ from __future__ import annotations
 import json, math, sys
 from pathlib import Path
 import psycopg
+from psycopg.rows import tuple_row
 from v80_database import get_connection_config
 
 TRAIN_SEASON="2024-25"
@@ -58,6 +59,7 @@ def metrics(ps,ys):
  return {"n":n,"brier":round(brier,6),"log_loss":round(ll,6),"directional_accuracy":round(acc,6),"ece_10_bins":round(ece,6),"calibration_bins":bins}
 def main():
  cfg=get_connection_config()
+ cfg["row_factory"]=tuple_row
  conn=psycopg.connect(**cfg)
  try:
   if not conn.pgconn.ssl_in_use: raise RuntimeError("TLS not active")
