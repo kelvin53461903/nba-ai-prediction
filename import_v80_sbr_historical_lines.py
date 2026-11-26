@@ -52,8 +52,11 @@ def build_rows(games):
   # SBR source notes that roughly 7% of archive rows have closing spread/total swapped.
   if 150<=spread<=300 and abs(total)<=40:spread,total=total,spread
   open_spread=float(r["home_open_spread"]);open_total=float(r["open_over_under"])
+  # Keep valid closing lines even if an opening value is missing or implausible.
+  if not (-40<=open_spread<=40):open_spread=None
+  if not (150<=open_total<=300):open_total=None
   hm=int(float(r["home_close_ml"]));am=int(float(r["away_close_ml"]))
-  if not (-40<=spread<=40 and 150<=total<=300 and -40<=open_spread<=40 and 150<=open_total<=300 and hm!=0 and am!=0 and abs(hm)<=10000 and abs(am)<=10000):
+  if not (-40<=spread<=40 and 150<=total<=300 and hm!=0 and am!=0 and abs(hm)<=10000 and abs(am)<=10000):
    invalid[int(r["season"])]+=1;continue
   season=g["season"]
   output.append({"game_id":g["game_id"],"season":season,"provider_id":"sbr",
