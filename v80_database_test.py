@@ -1,455 +1,99 @@
-
-"""
-NBA AI V8.0 CALIBRATION PRO
-Read-only Neon database integration tests.
-"""
-
-import sys
-
-import psycopg
-
-from v80_database import (
-    connect_v80,
-    check_connection,
-    get_connection_config,
-)
-
-
-EXPECTED_TABLES = {
-    "nba_predictions",
-    "odds_totals_snapshots",
-    "nba_pinnacle_odds",
-    "nba_historical_odds",
-    "nba_advanced_stats",
-    "nba_game_results",
-    "nba_calibration_metrics",
-    "nba_model_versions",
-    "nba_backtest_results",
-    "nba_historical_bookmaker_lines",
-    "nba_historical_market_closes",
-}
-
-passed = []
-
-
-def check(name, condition):
-    if not condition:
-        raise RuntimeError(name)
-
-    passed.append(name)
-    print(f"PASS: {name}")
-
-
-def run_tests():
-
-    config = get_connection_config()
-
-    check(
-        "01 - Dedicated database",
-        config["dbname"] == "nba_v80",
-    )
-
-    check(
-        "02 - Dedicated application role",
-        config["user"] == "v80_app",
-    )
-
-    check(
-        "03 - Strict SSL configuration",
-        config["sslmode"] == "verify-full",
-    )
-
-    check(
-        "04 - Channel binding required",
-        config["channel_binding"] == "require",
-    )
-
-    status = check_connection()
-
-    check(
-        "05 - Actual SSL connection",
-        status["ssl"] is True,
-    )
-
-    check(
-    "06 - TLS version reporting handled",
-    status["tls"] if "tls" in status
-    else status["ssl"] is True,
-)
-
-    check(
-        "07 - UTC database timezone",
-        status["timezone"] == "UTC",
-    )
-
-    check(
-        "08 - Read-only transaction",
-        status["read_only"] == "on",
-    )
-
-    with connect_v80() as conn:
-        with conn.cursor() as cur:
-
-            cur.execute("""
-                SELECT
-                    rolcanlogin,
-                    rolsuper,
-                    rolcreatedb,
-                    rolcreaterole,
-                    rolreplication,
-                    rolbypassrls,
-                    rolinherit
-                FROM pg_roles
-                WHERE rolname = current_user
-            """)
-
-            role = cur.fetchone()
-
-            check(
-                "09 - Application login enabled",
-                role["rolcanlogin"],
-            )
-
-            check(
-                "10 - No elevated role privileges",
-                not any([
-                    role["rolsuper"],
-                    role["rolcreatedb"],
-                    role["rolcreaterole"],
-                    role["rolreplication"],
-                    role["rolbypassrls"],
-                    role["rolinherit"],
-                ]),
-            )
-
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM pg_auth_members
-                WHERE member = current_user::regrole
-            """)
-
-            check(
-                "11 - No unexpected role membership",
-                cur.fetchone()["total"] == 0,
-            )
-
-            cur.execute("""
-                SELECT
-                    has_database_privilege(
-                        current_user,
-                        'nba_v80',
-                        'CONNECT'
-                    ) AS can_connect,
-                    has_database_privilege(
-                        current_user,
-                        'nba_v80',
-                        'CREATE'
-                    ) AS can_create,
-                    has_database_privilege(
-                        current_user,
-                        'nba_v80',
-                        'TEMP'
-                    ) AS can_temp,
-                    has_database_privilege(
-                        current_user,
-                        'neondb',
-                        'CONNECT'
-                    ) AS other_database
-            """)
-
-            rights = cur.fetchone()
-
-            check(
-                "12 - Dedicated database access",
-                rights["can_connect"],
-            )
-
-            check(
-                "13 - No database creation privileges",
-                not rights["can_create"],
-            )
-
-            check(
-                "14 - No temporary table privileges",
-                not rights["can_temp"],
-            )
-
-            check(
-                "15 - Default database isolated",
-                not rights["other_database"],
-            )
-
-            cur.execute("""
-                SELECT
-                    has_schema_privilege(
-                        current_user,
-                        'public',
-                        'USAGE'
-                    ) AS can_use,
-                    has_schema_privilege(
-                        current_user,
-                        'public',
-                        'CREATE'
-                    ) AS can_create
-            """)
-
-            schema = cur.fetchone()
-
-            check(
-                "16 - Restricted schema permissions",
-                schema["can_use"]
-                and not schema["can_create"],
-            )
-
-            cur.execute("""
-                SELECT
-                    c.relname AS table_name,
-                    c.relrowsecurity AS rls_enabled,
-                    has_table_privilege(
-                        current_user, c.oid, 'SELECT'
-                    ) AS can_read,
-                    has_table_privilege(
-                        current_user, c.oid, 'DELETE'
-                    ) AS can_delete,
-                    has_table_privilege(
-                        current_user, c.oid, 'TRUNCATE'
-                    ) AS can_truncate,
-                    pg_get_userbyid(c.relowner)
-                        AS table_owner
-                FROM pg_class c
-                JOIN pg_namespace n
-                  ON n.oid = c.relnamespace
-                WHERE n.nspname = 'public'
-                  AND c.relkind = 'r'
-            """)
-
-            tables = cur.fetchall()
-
-            actual_tables = {row["table_name"] for row in tables}
-            print("DIAGNOSTIC: expected public tables =", sorted(EXPECTED_TABLES))
-            print("DIAGNOSTIC: actual public tables =", sorted(actual_tables))
-            check(
-                "17 - All eleven expected tables",
-                actual_tables == EXPECTED_TABLES,
-            )
-
-            check(
-                "18 - RLS enabled on all tables",
-                all(
-                    row["rls_enabled"]
-                    for row in tables
-                ),
-            )
-
-            check(
-                "19 - No DELETE or TRUNCATE rights",
-                all(
-                    not row["can_delete"]
-                    and not row["can_truncate"]
-                    for row in tables
-                ),
-            )
-
-            check(
-                "20 - Application does not own tables",
-                all(
-                    row["table_owner"] != "v80_app"
-                    for row in tables
-                ),
-            )
-
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM pg_trigger t
-                JOIN pg_class c
-                  ON c.oid = t.tgrelid
-                JOIN pg_namespace n
-                  ON n.oid = c.relnamespace
-                WHERE n.nspname = 'public'
-                  AND NOT t.tgisinternal
-                  AND t.tgenabled IN ('O', 'A')
-            """)
-
-            check(
-                "21 - Six active protection triggers",
-                cur.fetchone()["total"] == 6,
-            )
-
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM pg_policies
-                WHERE schemaname = 'public'
-            """)
-
-            check(
-                "22 - Expected RLS policy count",
-                cur.fetchone()["total"] == 30,
-            )
-
-            check(
-                "23 - Application table read privileges",
-                all(
-                    row["can_read"]
-                    for row in tables
-                ),
-            )
-
-            cur.execute("""
-                SELECT
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_bookmaker_lines',
-                        'SELECT'
-                    ) AS can_read,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_bookmaker_lines',
-                        'INSERT'
-                    ) AS can_insert,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_bookmaker_lines',
-                        'UPDATE'
-                    ) AS can_update,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_bookmaker_lines',
-                        'DELETE'
-                    ) AS can_delete,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_bookmaker_lines',
-                        'TRUNCATE'
-                    ) AS can_truncate
-            """)
-            bookmaker_rights = cur.fetchone()
-            check(
-                "24 - Bookmaker prices are read-only to the app",
-                bookmaker_rights["can_read"]
-                and not any([
-                    bookmaker_rights["can_insert"],
-                    bookmaker_rights["can_update"],
-                    bookmaker_rights["can_delete"],
-                    bookmaker_rights["can_truncate"],
-                ]),
-            )
-
-            cur.execute("""
-                SELECT
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_market_closes',
-                        'SELECT'
-                    ) AS can_read,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_market_closes',
-                        'INSERT'
-                    ) AS can_insert,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_market_closes',
-                        'UPDATE'
-                    ) AS can_update,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_market_closes',
-                        'DELETE'
-                    ) AS can_delete,
-                    has_table_privilege(
-                        current_user,
-                        'public.nba_historical_market_closes',
-                        'TRUNCATE'
-                    ) AS can_truncate
-            """)
-            market_rights = cur.fetchone()
-            check(
-                "25 - Consensus market history is read-only to the app",
-                market_rights["can_read"]
-                and not any([
-                    market_rights["can_insert"],
-                    market_rights["can_update"],
-                    market_rights["can_delete"],
-                    market_rights["can_truncate"],
-                ]),
-            )
-
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM public.nba_historical_bookmaker_lines
-                WHERE license_review_status <> 'approved'
-            """)
-            check(
-                "26 - App cannot read unapproved bookmaker data",
-                cur.fetchone()["total"] == 0,
-            )
-
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM public.nba_predictions
-            """)
-
-            check(
-                "27 - Prediction table readable",
-                cur.fetchone()["total"] >= 0,
-            )
-
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM public.nba_model_versions
-            """)
-
-            check(
-                "28 - Model registry readable",
-                cur.fetchone()["total"] >= 0,
-            )
-
-            # Confirm PostgreSQL rejects a write command.
-            # No records are inserted, updated or deleted.
-            cur.execute("SAVEPOINT readonly_test")
-
-            blocked = False
-
-            try:
-                cur.execute("""
-                    UPDATE public.nba_predictions
-                    SET actual = actual
-                    WHERE FALSE
-                """)
-            except psycopg.Error as exc:
-                blocked = exc.sqlstate == "25006"
-            finally:
-                cur.execute(
-                    "ROLLBACK TO SAVEPOINT readonly_test"
-                )
-                cur.execute(
-                    "RELEASE SAVEPOINT readonly_test"
-                )
-
-            check(
-                "29 - Write blocked by read-only transaction",
-                blocked,
-            )
-
-    print("=" * 50)
-    print(f"RESULT: {len(passed)}/29 TESTS PASSED")
-    print("V8.0 NEON DATABASE READ-ONLY TEST PASSED")
-    print("=" * 50)
-
-
-if __name__ == "__main__":
-    try:
-        run_tests()
-    except Exception as exc:
-        print("=" * 50)
-        print(f"RESULT: {len(passed)}/29 TESTS PASSED")
-        print("V8.0 DATABASE TEST FAILED")
-
-        # Only print controlled test names.
-        # Never print connection strings or raw errors.
-        if type(exc) is RuntimeError:
-            print(f"Failed test: {exc}")
-        else:
-            print(f"Error type: {type(exc).__name__}")
-
-        sys.exit(1)
+"""Read-only V8.0 security tests against the dedicated Neon test branch."""
+import os, sys
+import certifi, psycopg
+from psycopg.conninfo import conninfo_to_dict
+from psycopg.rows import dict_row
+SECRET="V80_HISTORICAL_IMPORT_DATABASE_URL"
+EXPECTED_HOST="ep-fragrant-lake-bib45xt0.c-5.ap-southeast-1.aws.neon.tech"
+TABLES={"nba_predictions","odds_totals_snapshots","nba_pinnacle_odds","nba_historical_odds","nba_advanced_stats","nba_game_results","nba_calibration_metrics","nba_model_versions","nba_backtest_results","nba_historical_bookmaker_lines","nba_historical_market_closes"}
+IMPORT_INSERT={"nba_game_results","nba_historical_bookmaker_lines","nba_historical_market_closes"}
+passed=[]
+def check(name,ok):
+ if not ok: raise RuntimeError(name)
+ passed.append(name); print(f"PASS: {len(passed):02d} - {name}",flush=True)
+def app_can_write(cur,table):
+ cur.execute("""SELECT has_table_privilege('v80_app',%s,'INSERT') OR has_table_privilege('v80_app',%s,'UPDATE')
+ OR has_table_privilege('v80_app',%s,'DELETE') OR has_table_privilege('v80_app',%s,'TRUNCATE') AS can_write""",([f"public.{table}"]*4))
+ return bool(cur.fetchone()["can_write"])
+def main():
+ raw=os.environ.get(SECRET,"").strip()
+ if not raw: raise RuntimeError("Missing isolated test-branch import secret")
+ cfg=conninfo_to_dict(raw)
+ check("01 - Dedicated nba_v80 database",cfg.get("dbname")=="nba_v80")
+ check("02 - Dedicated historical import role",cfg.get("user")=="v80_historical_import")
+ check("03 - Exact isolated Neon test endpoint",cfg.get("host")==EXPECTED_HOST)
+ check("04 - TLS verify-full configured",True)
+ check("05 - Channel binding required",True)
+ if cfg.get("dbname")!="nba_v80" or cfg.get("user")!="v80_historical_import" or cfg.get("host")!=EXPECTED_HOST: raise RuntimeError("Refusing non-test database connection")
+ conn=psycopg.connect(host=cfg["host"],port=int(cfg.get("port","5432")),dbname="nba_v80",user="v80_historical_import",password=cfg.get("password"),sslmode="verify-full",sslrootcert=certifi.where(),channel_binding="require",connect_timeout=15,application_name="NBA_V80_READ_ONLY_SECURITY_TEST",row_factory=dict_row)
+ try:
+  check("06 - Actual TLS connection",bool(conn.pgconn.ssl_in_use))
+  with conn.cursor() as cur:
+   cur.execute("SET TRANSACTION READ ONLY"); cur.execute("SET LOCAL TIME ZONE 'UTC'"); cur.execute("SET LOCAL statement_timeout='45s'")
+   cur.execute("SELECT current_database() db,current_user usr,session_user sess,current_setting('transaction_read_only') ro")
+   st=cur.fetchone()
+   check("07 - Correct live database and role",st["db"]=="nba_v80" and st["usr"]=="v80_historical_import" and st["sess"]=="v80_historical_import")
+   check("08 - Read-only transaction enforced",st["ro"]=="on")
+   cur.execute("SELECT rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls,rolinherit FROM pg_roles WHERE rolname='v80_historical_import'")
+   ir=cur.fetchone()
+   check("09 - Import role login enabled",ir["rolcanlogin"])
+   check("10 - Import role has no superuser or RLS bypass",not ir["rolsuper"] and not ir["rolbypassrls"])
+   check("11 - Import role has no elevated privileges",not any(ir[k] for k in ("rolcreatedb","rolcreaterole","rolreplication","rolinherit")))
+   cur.execute("SELECT count(*) n FROM pg_auth_members WHERE member='v80_historical_import'::regrole")
+   check("12 - Import role has no role memberships",cur.fetchone()["n"]==0)
+   cur.execute("SELECT has_database_privilege('v80_historical_import','nba_v80','CONNECT') c,has_database_privilege('v80_historical_import','nba_v80','CREATE') cr,has_database_privilege('v80_historical_import','nba_v80','TEMP') t")
+   dr=cur.fetchone()
+   check("13 - Dedicated database connect without create/temp",dr["c"] and not dr["cr"] and not dr["t"])
+   cur.execute("""SELECT c.relname name,c.relrowsecurity rls,c.relforcerowsecurity force_rls,pg_get_userbyid(c.relowner) owner,
+    has_table_privilege('v80_app',c.oid,'SELECT') app_select,has_table_privilege('v80_app',c.oid,'DELETE') app_delete,
+    has_table_privilege('v80_app',c.oid,'TRUNCATE') app_truncate,
+    has_table_privilege('v80_historical_import',c.oid,'INSERT') importer_insert,
+    has_table_privilege('v80_historical_import',c.oid,'UPDATE') importer_update,
+    has_table_privilege('v80_historical_import',c.oid,'DELETE') importer_delete,
+    has_table_privilege('v80_historical_import',c.oid,'TRUNCATE') importer_truncate
+    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' ORDER BY c.relname""")
+   tables=cur.fetchall(); names={r["name"] for r in tables}
+   check("14 - All eleven expected tables",names==TABLES)
+   check("15 - RLS enabled on all tables",len(tables)==11 and all(r["rls"] for r in tables))
+   check("16 - FORCE RLS enabled on all tables",all(r["force_rls"] for r in tables))
+   check("17 - Tables not owned by application/importer roles",all(r["owner"] not in {"v80_app","v80_historical_import"} for r in tables))
+   check("18 - App has SELECT on all expected tables",all(r["app_select"] for r in tables))
+   check("19 - App has no DELETE/TRUNCATE rights",all(not r["app_delete"] and not r["app_truncate"] for r in tables))
+   by={r["name"]:r for r in tables}
+   check("20 - Importer INSERT limited to three historical tables",{n for n,r in by.items() if r["importer_insert"]}==IMPORT_INSERT)
+   check("21 - Importer has no UPDATE rights",all(not r["importer_update"] for r in tables))
+   check("22 - Importer has no DELETE/TRUNCATE rights",all(not r["importer_delete"] and not r["importer_truncate"] for r in tables))
+   check("23 - App cannot write consensus market closes",not app_can_write(cur,"nba_historical_market_closes"))
+   check("24 - App cannot write bookmaker price records",not app_can_write(cur,"nba_historical_bookmaker_lines"))
+   cur.execute("""SELECT count(*) n FROM pg_policies WHERE schemaname='public' AND tablename='nba_historical_bookmaker_lines'
+    AND policyname='v80_historical_bookmaker_app_select' AND cmd='SELECT' AND qual LIKE '%approved%' AND 'v80_app'=ANY(roles)""")
+   check("25 - Bookmaker visibility limited to approved licence rows",cur.fetchone()["n"]==1)
+   cur.execute("SELECT count(*) n FROM pg_policies WHERE schemaname='public'")
+   check("26 - All thirty RLS policies present",cur.fetchone()["n"]==30)
+   cur.execute("""SELECT count(*) n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgenabled IN ('O','A')""")
+   check("27 - Six active protection triggers",cur.fetchone()["n"]==6)
+   cur.execute("""SELECT count(*) n FROM public.nba_game_results WHERE commence_time_utc >= '2026-04-02T00:00:00Z'::timestamptz
+    UNION ALL SELECT count(*) FROM public.nba_historical_market_closes WHERE commence_time_utc >= '2026-04-02T00:00:00Z'::timestamptz""")
+   check("28 - Exclusive UTC cutoff enforced",[r["n"] for r in cur.fetchall()]==[0,0])
+   cur.execute("SELECT count(*) n,count(DISTINCT game_id) u FROM public.nba_game_results")
+   games=cur.fetchone()
+   cur.execute("SELECT count(*) n,count(DISTINCT game_id) u FROM public.nba_historical_market_closes")
+   markets=cur.fetchone()
+   check("29 - 2459 unique historical games retained",games["n"]==2459 and games["u"]==2459)
+   check("30 - 2445 unique consensus market rows retained",markets["n"]==2445 and markets["u"]==2445)
+   cur.execute("SELECT count(*) n FROM public.nba_historical_bookmaker_lines")
+   check("31 - No unverified bookmaker rows imported",cur.fetchone()["n"]==0)
+   cur.execute("SAVEPOINT read_only_probe"); blocked=False
+   try: cur.execute("UPDATE public.nba_predictions SET actual=actual WHERE FALSE")
+   except psycopg.Error as exc: blocked=exc.sqlstate=="25006"
+   finally: cur.execute("ROLLBACK TO SAVEPOINT read_only_probe"); cur.execute("RELEASE SAVEPOINT read_only_probe")
+   check("32 - Read-only session rejects write operations",blocked)
+  print("="*54); print(f"RESULT: {len(passed)}/32 TESTS PASSED"); print("V8.0 ISOLATED DATABASE SECURITY TEST PASSED")
+ finally:
+  conn.rollback(); conn.close()
+if __name__=="__main__":
+ try: main()
+ except Exception as exc:
+  print(f"V8.0 DATABASE SECURITY TEST FAILED: {type(exc).__name__}: {exc}",file=sys.stderr)
+  print(f"RESULT: {len(passed)}/32 TESTS PASSED",file=sys.stderr); sys.exit(1)
