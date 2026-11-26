@@ -21,3 +21,4 @@ class Phase6BTests(unittest.TestCase):
   self.assertEqual(same_day["home_prev_games"],0)
   self.assertEqual(next_day["home_prev_games"],2)
 if __name__=="__main__": unittest.main()
+
