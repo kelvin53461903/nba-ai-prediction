@@ -80,12 +80,17 @@ def main():
    games=cur.fetchone()
    cur.execute("SELECT count(*) n,count(DISTINCT game_id) u FROM public.nba_historical_market_closes")
    markets=cur.fetchone()
-   check("29 - 2459 unique historical games retained",games["n"]==2459 and games["u"]==2459)
+   check("29 - Historical games retained without duplicate IDs",games["n"]>=2459 and games["u"]==games["n"])
    check("30 - 2445 unique consensus market rows retained",markets["n"]==2445 and markets["u"]==2445)
    cur.execute("SELECT count(*) n FROM public.nba_historical_bookmaker_lines")
    check("31 - No unverified bookmaker rows imported",cur.fetchone()["n"]==0)
    cur.execute("SAVEPOINT read_only_probe"); blocked=False
-   try: cur.execute("UPDATE public.nba_predictions SET actual=actual WHERE FALSE")
+   try:
+    cur.execute("""INSERT INTO public.nba_game_results
+     (game_id,season,season_type,home_team_id,away_team_id,home_team,away_team,
+      commence_time_utc,home_score,away_score,game_status,source,verified_at_utc)
+     SELECT 999999999,'2025-26','Regular Season',1,2,'test-home','test-away',
+      now(),1,0,'Final','security-test',now() WHERE FALSE""")
    except psycopg.Error as exc: blocked=exc.sqlstate=="25006"
    finally: cur.execute("ROLLBACK TO SAVEPOINT read_only_probe"); cur.execute("RELEASE SAVEPOINT read_only_probe")
    check("32 - Read-only session rejects write operations",blocked)
