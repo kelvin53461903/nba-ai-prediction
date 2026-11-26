@@ -54,8 +54,10 @@ def main():
   if seasons[season]<EXPECTED_REGULAR[season]: raise RuntimeError(f"Season count below regular-season minimum for {season}: {seasons[season]}")
   regular=sum(1 for r in rows if r["season"]==season and r["season_type"]=="Regular Season")
   playoffs=sum(1 for r in rows if r["season"]==season and r["season_type"]=="Playoffs")
-  if regular!=EXPECTED_REGULAR[season] or playoffs<70:
-   raise RuntimeError(f"Official season coverage mismatch for {season}: regular={regular}, playoffs={playoffs}")
+  cup_final=sum(1 for r in rows if r["season"]==season and r["season_type"]=="In-Season Tournament Final")
+  expected_cup=1 if season=="2023-24" else 0
+  if regular!=EXPECTED_REGULAR[season] or playoffs<70 or cup_final!=expected_cup:
+   raise RuntimeError(f"Official season coverage mismatch for {season}: regular={regular}, playoffs={playoffs}, cup_final={cup_final}")
  digest=hashlib.sha256(PATH.read_bytes()).hexdigest()
  result={"status":"PASS","rows":len(rows),"unique_game_ids":len(ids),"season_counts":dict(sorted(seasons.items())),
   "season_type_counts":dict(types),"cutoff_exclusive_utc":CUTOFF.isoformat(),"sha256":digest,
