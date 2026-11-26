@@ -1,6 +1,6 @@
 """Validate the expanded 2020-21 to 2023-24 NBA CSV before any database import."""
 import csv, hashlib, json, sys
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -27,7 +27,7 @@ def main():
    raise RuntimeError("Historical CSV header is incomplete")
   rows=list(reader)
  if not rows: raise RuntimeError("Historical CSV is empty")
- ids=set(); seasons=Counter(); types=Counter()
+ ids=set(); seasons=Counter(); types=Counter(); team_counts=defaultdict(Counter)
  for n,r in enumerate(rows,start=2):
   gid=int(r["game_id"])
   if gid<=0 or gid in ids: raise RuntimeError(f"Invalid/duplicate game ID at CSV line {n}")
@@ -44,6 +44,9 @@ def main():
   else:
    expected_type="Regular Season" if game_day<=REGULAR_END[season] else "Playoffs"
   if r["season_type"]!=expected_type: raise RuntimeError(f"Season type does not match official calendar at line {n}")
+  if expected_type=="Regular Season":
+   team_counts[season][str(r["home_team_id"])]+=1
+   team_counts[season][str(r["away_team_id"])]+=1
   if tip>=CUTOFF or verified<=tip: raise RuntimeError(f"Cutoff/verification timestamp failure at line {n}")
   hs=int(r["home_score"]); aws=int(r["away_score"])
   if hs<0 or aws<0 or hs==aws: raise RuntimeError(f"Invalid final score at line {n}")
@@ -58,6 +61,9 @@ def main():
   expected_cup=1 if season=="2023-24" else 0
   if regular!=EXPECTED_REGULAR[season] or playoffs<70 or cup_final!=expected_cup:
    raise RuntimeError(f"Official season coverage mismatch for {season}: regular={regular}, playoffs={playoffs}, cup_final={cup_final}")
+  expected_per_team=72 if season=="2020-21" else 82
+  if len(team_counts[season])!=30 or any(v!=expected_per_team for v in team_counts[season].values()):
+   raise RuntimeError(f"Team-level regular-season coverage mismatch for {season}: teams={len(team_counts[season])}, game_counts={sorted(set(team_counts[season].values()))}")
  digest=hashlib.sha256(PATH.read_bytes()).hexdigest()
  result={"status":"PASS","rows":len(rows),"unique_game_ids":len(ids),"season_counts":dict(sorted(seasons.items())),
   "season_type_counts":dict(types),"cutoff_exclusive_utc":CUTOFF.isoformat(),"sha256":digest,
