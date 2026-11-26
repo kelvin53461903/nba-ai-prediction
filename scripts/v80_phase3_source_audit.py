@@ -199,13 +199,19 @@ def audit_sbr(games: list[dict]) -> dict:
     result = {
         "source": "flancast90/sportsbookreview-scraper",
         "revision": "1a820e50c6fbd0276cde073c22bfffae78930868",
-        "license": "MIT (per upstream archive documentation)",
+        "license": "Repository software is MIT; rights to redistribute the bundled historical data have not been independently verified",
         "bytes": path.stat().st_size,
         "json_rows": len(rows),
         "source_season_counts_start_year": dict(sorted(season_counts.items())),
         "target_rows_2020_21_and_2021_22": len(target),
         "source_field_names": source_keys,
         "raw_market_field_quality_counts": dict(line_quality),
+        "market_price_availability": {
+            "moneyline_close_prices": "available as home_close_ml and away_close_ml",
+            "spread_close_prices": "not present in the NBA archive schema; only home_close_spread and away_close_spread lines are present",
+            "total_close_prices": "not present in the NBA archive schema; only close_over_under total line is present",
+            "roi_eligibility": "moneyline may be evaluated after price validation; spread and total ROI are not eligible without both-side prices and a verified price source",
+        },
         "matched_unique_games": len(assigned),
         "matched_by_season": dict(matched_by_season),
         "score_validation": {
