@@ -144,8 +144,10 @@ def audit_sbr(games: list[dict]) -> dict:
                 "home": r.get("home_team"), "away": r.get("away_team"),
                 "candidate_game_ids": [x[1]["game_id"] for x in matches],
                 "best_day_delta": matches[0][0],
-                "source_score_fields": {k:r.get(k) for k in
-                    ("home_score","away_score","score_home","score_away","score") if k in r},
+                "source_score_fields": {
+                    "home_final": r.get("home_final"),
+                    "away_final": r.get("away_final"),
+                },
             })
     # Greedy one-to-one assignment, nearest date first. Ambiguous collisions
     # remain visible in the report rather than silently double-matching.
@@ -165,11 +167,10 @@ def audit_sbr(games: list[dict]) -> dict:
     score_checks = Counter()
     score_mismatches = []
     for candidate, game_id in assigned:
-        src = rows[candidate["source_index"]]
         game = game_by_id[game_id]
         try:
-            src_home = int(float(src["home_final"]))
-            src_away = int(float(src["away_final"]))
+            src_home = int(float(candidate["source_score_fields"]["home_final"]))
+            src_away = int(float(candidate["source_score_fields"]["away_final"]))
             db_home = int(game["home_score"])
             db_away = int(game["away_score"])
             score_checks["checked"] += 1
