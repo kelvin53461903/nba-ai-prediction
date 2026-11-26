@@ -91,7 +91,7 @@ def main():
     AND policyname='v80_historical_bookmaker_import_insert' AND cmd='INSERT'
     AND 'v80_historical_import'=ANY(roles) AND with_check LIKE '%2026-04-02%'""")
    if cur.fetchone()["count"]!=1:raise RuntimeError("Cutoff RLS insert policy missing")
-   cur.execute("""SELECT game_id,season,home_team,away_team,commence_time_utc,home_score,away_score
+   cur.execute("""SELECT game_id,season,home_team_id,away_team_id,home_team,away_team,commence_time_utc,home_score,away_score
     FROM public.nba_game_results WHERE season IN ('2020-21','2021-22') AND game_status='Final' AND commence_time_utc<%s
     ORDER BY commence_time_utc""",(CUTOFF,))
    games=cur.fetchall()
