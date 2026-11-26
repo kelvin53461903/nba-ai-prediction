@@ -15,4 +15,13 @@ class Phase7BTests(unittest.TestCase):
  def test_metrics_range(self):
   x=m.metrics([0,1,0,1],[.2,.8,.3,.7])
   self.assertEqual(x["n"],4); self.assertGreaterEqual(x["brier"],0); self.assertLessEqual(x["brier"],1)
+
+ def test_rejects_post_tip_snapshot(self):
+  self.assertFalse(m.row_has_strict_pre_tip_snapshot({"closing_snapshot":"2025-01-01T20:01:00Z","commence_time_utc":"2025-01-01T20:00:00Z"}))
+ def test_rejects_snapshot_at_tip(self):
+  self.assertFalse(m.row_has_strict_pre_tip_snapshot({"closing_snapshot":"2025-01-01T20:00:00Z","commence_time_utc":"2025-01-01T20:00:00Z"}))
+ def test_accepts_strict_pre_tip_snapshot(self):
+  self.assertTrue(m.row_has_strict_pre_tip_snapshot({"closing_snapshot":"2025-01-01T19:59:00Z","commence_time_utc":"2025-01-01T20:00:00Z"}))
+ def test_rejects_timezone_naive_snapshot(self):
+  self.assertFalse(m.row_has_strict_pre_tip_snapshot({"closing_snapshot":"2025-01-01T19:59:00","commence_time_utc":"2025-01-01T20:00:00Z"}))
 if __name__=="__main__":unittest.main()
