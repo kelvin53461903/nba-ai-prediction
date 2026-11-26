@@ -1,0 +1,59 @@
+name: NBA V8.0 Phase 8 Integration Candidate
+
+on:
+  push:
+    branches:
+      - v8.0-phase8-integration-candidate
+    paths:
+      - "app.py"
+      - "v80_market_integration.py"
+      - "tests/test_v80_market_integration.py"
+      - ".github/workflows/v80_phase8_integration.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app.py"
+      - "v80_market_integration.py"
+      - "tests/test_v80_market_integration.py"
+      - ".github/workflows/v80_phase8_integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-v80-phase8-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guarded-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile application and integration module
+        run: python -m py_compile app.py v80_market_integration.py tests/test_v80_market_integration.py
+
+      - name: Run fail-closed release gate tests
+        run: python -m unittest discover -s tests -p "test_v80_market_integration.py" -v
+
+      - name: Verify V8.0 markets default to disabled
+        run: |
+          python - <<'PY'
+          import os
+          from v80_market_integration import load_manifest, market_release_ready
+          manifest = load_manifest()
+          assert not market_release_ready(
+              manifest,
+              feature_enabled=os.environ.get("NBA_V80_MARKETS_ENABLED", "").lower() in {"1", "true", "yes", "on"},
+          )
+          print("PASS: V8.0 market integration remains fail-closed by default")
+          PY
