@@ -19,7 +19,7 @@ def main():
     for year in range(START_SEASON,END_SEASON+1):
         season_rows=fetch_season(session,year,min_interval=12.5,max_pages=100)
         # Match the existing V8.0 evaluation scope: regular season and playoffs only.
-        season_rows=[r for r in season_rows if r["season_type"] in {"Regular Season","Playoffs"}
+        season_rows=[r for r in season_rows if r["season_type"] in {"Regular Season","Playoffs","In-Season Tournament Final"}
           and dt.datetime.fromisoformat(r["commence_time_utc"].replace("Z","+00:00"))<CUTOFF]
         print(f"SEASON {year}: eligible regular/playoff finals={len(season_rows)}",flush=True)
         rows.extend(season_rows)
