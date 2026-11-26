@@ -1,6 +1,7 @@
 name: NBA V8.0 Phase 3 Historical Odds Source Audit
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - v8.0-phase2-historical-market-audit
@@ -28,6 +29,14 @@ jobs:
           python-version: "3.12"
       - name: Install audit dependencies
         run: python -m pip install --disable-pip-version-check duckdb psycopg[binary] certifi requests
+      - name: Verify isolated database secret is configured
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: |
+          if [ -z "$V80_HISTORICAL_IMPORT_DATABASE_URL" ]; then
+            echo "::error::Missing V80_HISTORICAL_IMPORT_DATABASE_URL. Configure it with the isolated nba_v80 test-branch connection string."
+            exit 1
+          fi
       - name: Run read-only source audit
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
