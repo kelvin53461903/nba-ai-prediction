@@ -34,7 +34,7 @@ jobs:
         with:
           name: nba-v80-phase3-source-audit
           run-id: 45806673683
-          github-token: \${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           path: artifacts
       - name: Compile and test
         run: |
