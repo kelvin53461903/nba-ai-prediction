@@ -45,6 +45,20 @@ jobs:
         run: python collect_v80_early_season_games.py
       - name: Validate expanded historical CSV
         run: python validate_v80_early_season_games.py
+      - name: Compile isolated database importer
+        run: python -m py_compile import_v80_early_season_games.py
+      - name: Dry-run expanded historical import
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+          CONFIRM_EARLY_SEASON_IMPORT: YES
+          IMPORT_MODE: dry-run
+        run: python import_v80_early_season_games.py
+      - name: Commit validated historical games to isolated V8.0 test database
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+          CONFIRM_EARLY_SEASON_IMPORT: YES
+          IMPORT_MODE: commit
+        run: python import_v80_early_season_games.py
       - name: Upload historical games and validation report
         if: always()
         uses: actions/upload-artifact@v4
