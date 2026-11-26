@@ -60,6 +60,7 @@ def download_sources():
    if r["season"]!=season: raise RuntimeError(f"{season}: wrong season label")
    r["_season"]=season; r["_dataset"]=dataset; r["_url"]=url; r["_tip"]=parse_utc(r["start_time_utc"])
    for k in ("home_score","away_score","bookmakers"): r[k]=int(r[k])
+   r["bookmaker_count"]=r["bookmakers"]
    for k in ("open_home_win_prob","close_home_win_prob","close_fair_home_odds","close_fair_away_odds","open_spread_home","close_spread_home","close_home_cover_prob","open_total","close_total","close_over_prob"): r[k]=float(r[k])
    r["_sha256"]=hashes[season]
   out.extend(rows)
