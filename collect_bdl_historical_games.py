@@ -90,15 +90,17 @@ def fetch_season(session, year, min_interval, max_pages):
                 # BALLDONTLIE's games endpoint may expose only a postseason boolean.
                 # Apply official season calendar bounds so preseason is never mislabeled regular season.
                 season_windows = {
-                    2020: ("2020-12-22", "2021-07-21"),
-                    2021: ("2021-10-19", "2022-06-16"),
-                    2022: ("2022-10-18", "2023-06-12"),
-                    2023: ("2023-10-24", "2024-06-17"),
+                    2020: ("2020-12-22", "2021-05-16", "2021-07-21"),
+                    2021: ("2021-10-19", "2022-04-10", "2022-06-16"),
+                    2022: ("2022-10-18", "2023-04-09", "2023-06-12"),
+                    2023: ("2023-10-24", "2024-04-14", "2024-06-17"),
                 }
-                start_day, end_day = season_windows[year]
-                if not (start_day <= commence.date().isoformat() <= end_day):
+                start_day, regular_end_day, end_day = season_windows[year]
+                game_day = commence.date().isoformat()
+                if not (start_day <= game_day <= end_day):
                     continue
-                season_type = "Playoffs" if bool(game.get("postseason")) else "Regular Season"
+                # Use the official regular-season end date to avoid labelling play-in games as regular season.
+                season_type = "Regular Season" if game_day <= regular_end_day else "Playoffs"
             rows.append({
                 "game_id": int(game["id"]),
                 "season": season_label(int(game.get("season", year))),
