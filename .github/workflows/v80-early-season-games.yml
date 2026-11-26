@@ -10,6 +10,7 @@ on:
       - 'import_v80_early_season_games.py'
       - 'v80_multi_season_walkforward.py'
       - 'v80_recent_form_backtest.py'
+      - 'v80_database_test.py'
       - '.github/workflows/v80-early-season-games.yml'
   workflow_dispatch:
 
@@ -68,6 +69,10 @@ jobs:
           CONFIRM_EARLY_SEASON_IMPORT: YES
           IMPORT_MODE: commit
         run: python import_v80_early_season_games.py
+      - name: Re-run all 32 isolated Neon security checks after import
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python v80_database_test.py
       - name: Run expanding-window six-season walk-forward test
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
