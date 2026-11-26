@@ -25,6 +25,7 @@ EXPECTED_TABLES = {
     "nba_calibration_metrics",
     "nba_model_versions",
     "nba_backtest_results",
+    "nba_historical_bookmaker_lines",
 }
 
 passed = []
@@ -224,7 +225,7 @@ def run_tests():
             tables = cur.fetchall()
 
             check(
-                "17 - All nine expected tables",
+                "17 - All ten expected tables",
                 {
                     row["table_name"]
                     for row in tables
@@ -281,7 +282,7 @@ def run_tests():
 
             check(
                 "22 - Expected RLS policy count",
-                cur.fetchone()["total"] == 22,
+                cur.fetchone()["total"] == 25,
             )
 
             check(
@@ -293,12 +294,62 @@ def run_tests():
             )
 
             cur.execute("""
+                SELECT
+                    has_table_privilege(
+                        current_user,
+                        'public.nba_historical_bookmaker_lines',
+                        'SELECT'
+                    ) AS can_read,
+                    has_table_privilege(
+                        current_user,
+                        'public.nba_historical_bookmaker_lines',
+                        'INSERT'
+                    ) AS can_insert,
+                    has_table_privilege(
+                        current_user,
+                        'public.nba_historical_bookmaker_lines',
+                        'UPDATE'
+                    ) AS can_update,
+                    has_table_privilege(
+                        current_user,
+                        'public.nba_historical_bookmaker_lines',
+                        'DELETE'
+                    ) AS can_delete,
+                    has_table_privilege(
+                        current_user,
+                        'public.nba_historical_bookmaker_lines',
+                        'TRUNCATE'
+                    ) AS can_truncate
+            """)
+            bookmaker_rights = cur.fetchone()
+            check(
+                "24 - Bookmaker prices are read-only to the app",
+                bookmaker_rights["can_read"]
+                and not any([
+                    bookmaker_rights["can_insert"],
+                    bookmaker_rights["can_update"],
+                    bookmaker_rights["can_delete"],
+                    bookmaker_rights["can_truncate"],
+                ]),
+            )
+
+            cur.execute("""
+                SELECT COUNT(*) AS total
+                FROM public.nba_historical_bookmaker_lines
+                WHERE license_review_status <> 'approved'
+            """)
+            check(
+                "25 - App cannot read unapproved bookmaker data",
+                cur.fetchone()["total"] == 0,
+            )
+
+            cur.execute("""
                 SELECT COUNT(*) AS total
                 FROM public.nba_predictions
             """)
 
             check(
-                "24 - Prediction table readable",
+                "26 - Prediction table readable",
                 cur.fetchone()["total"] >= 0,
             )
 
@@ -308,7 +359,7 @@ def run_tests():
             """)
 
             check(
-                "25 - Model registry readable",
+                "27 - Model registry readable",
                 cur.fetchone()["total"] >= 0,
             )
 
@@ -335,12 +386,12 @@ def run_tests():
                 )
 
             check(
-                "26 - Write blocked by read-only transaction",
+                "28 - Write blocked by read-only transaction",
                 blocked,
             )
 
     print("=" * 50)
-    print(f"RESULT: {len(passed)}/26 TESTS PASSED")
+    print(f"RESULT: {len(passed)}/28 TESTS PASSED")
     print("V8.0 NEON DATABASE READ-ONLY TEST PASSED")
     print("=" * 50)
 
