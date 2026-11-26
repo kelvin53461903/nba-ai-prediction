@@ -22,6 +22,8 @@ import requests
 
 OUT = Path("artifacts/v80_phase3")
 OUT.mkdir(parents=True, exist_ok=True)
+SOURCE_CACHE = Path(".cache_v80_phase3")
+SOURCE_CACHE.mkdir(parents=True, exist_ok=True)
 SBR_URL = (
     "https://raw.githubusercontent.com/flancast90/sportsbookreview-scraper/"
     "1a820e50c6fbd0276cde073c22bfffae78930868/data/nba_archive_10Y.json"
@@ -84,7 +86,7 @@ def sbr_day(row: dict) -> date:
     return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
 
 def audit_sbr(games: list[dict]) -> dict:
-    path = OUT / "nba_archive_10Y.json"
+    path = SOURCE_CACHE / "nba_archive_10Y.json"
     download(SBR_URL, path)
     rows = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(rows, list):
@@ -222,7 +224,7 @@ def audit_sbr(games: list[dict]) -> dict:
     return result
 
 def audit_consensus() -> dict:
-    path = OUT / "closing_lines_odds_api.parquet"
+    path = SOURCE_CACHE / "closing_lines_odds_api.parquet"
     download(ODDS_API_URL, path)
     con = duckdb.connect()
     schema = con.execute("DESCRIBE SELECT * FROM read_parquet(?)", [str(path)]).fetchall()
