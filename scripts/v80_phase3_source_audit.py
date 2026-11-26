@@ -85,6 +85,32 @@ def sbr_day(row: dict) -> date:
     raw = str(int(row["date"]))
     return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
 
+def american_to_implied_probability(odds: float) -> float:
+    """Convert American odds to raw implied probability (before de-vigging)."""
+    value = float(odds)
+    if value == 0:
+        raise ValueError("American odds cannot be zero")
+    if value > 0:
+        return 100.0 / (value + 100.0)
+    return -value / (-value + 100.0)
+
+
+def devig_two_way(home_odds: float, away_odds: float) -> tuple[float, float]:
+    """Normalize two American prices to a two-way no-vig probability pair."""
+    home_raw = american_to_implied_probability(home_odds)
+    away_raw = american_to_implied_probability(away_odds)
+    total = home_raw + away_raw
+    if total <= 0:
+        raise ValueError("Invalid two-way implied probability total")
+    return home_raw / total, away_raw / total
+
+
+def brier_score(probability_outcomes: list[tuple[float, float]]) -> float | None:
+    if not probability_outcomes:
+        return None
+    return sum((float(p) - float(y)) ** 2 for p, y in probability_outcomes) / len(probability_outcomes)
+
+
 def sbr_close_lines(row: dict) -> tuple[float | None, float | None]:
     """Repair the known ~7% SBR spread/total column swap using the upstream audited rule."""
     s = float(row.get("home_close_spread") or 0)
@@ -239,9 +265,7 @@ def audit_sbr(games: list[dict]) -> dict:
             hml = float(src.get("home_close_ml"))
             aml = float(src.get("away_close_ml"))
             if hml != 0 and aml != 0:
-                hp = (100.0 / (hml + 100.0)) if hml > 0 else (-hml / (-hml + 100.0))
-                ap = (100.0 / (aml + 100.0)) if aml > 0 else (-aml / (-aml + 100.0))
-                ph = hp / (hp + ap)
+                ph, _ = devig_two_way(hml, aml)
                 actual_home = 1.0 if game["home_score"] > game["away_score"] else 0.0
                 ml_probs.append((ph, actual_home))
                 home_ml_values.append(hml)
@@ -292,7 +316,7 @@ def audit_sbr(games: list[dict]) -> dict:
         return {"n": len(ordered), "min": round(ordered[0], 3), "median": round(median, 3), "max": round(ordered[-1], 3), "mean": round(sum(ordered)/len(ordered), 3)}
     if ml_probs:
         ml_accuracy = sum((p >= 0.5) == bool(y) for p, y in ml_probs) / len(ml_probs)
-        ml_brier = sum((p - y) ** 2 for p, y in ml_probs) / len(ml_probs)
+        ml_brier = brier_score(ml_probs)
     else:
         ml_accuracy = None
         ml_brier = None
