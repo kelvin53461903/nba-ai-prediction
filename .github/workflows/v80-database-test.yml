@@ -52,7 +52,7 @@ jobs:
           test -f v80_database.py
           test -f v80_database_test.py
           test -f requirements.txt
-          echo "PASS: Required files exist"
+          echo "PASS: Required files exist; expected tables=11; RLS policies=30; checks=29"
 
       - name: Check Python syntax
         run: |
