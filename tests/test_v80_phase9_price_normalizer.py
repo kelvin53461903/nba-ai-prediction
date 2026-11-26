@@ -34,4 +34,18 @@ class PriceNormalizerTests(unittest.TestCase):
   self.assertEqual(len(rows),3)
  def test_rejects_missing_snapshot_timestamp(self):
   with self.assertRaises(ValueError): m.normalize_historical_response({"data":{**EVENT,"bookmakers":[BOOK]}})
+
+ def test_never_combines_sides_across_bookmakers(self):
+  partial_home={"key":"book-home","markets":[{"key":"h2h","outcomes":[{"name":"Boston Celtics","price":1.65}]}]}
+  partial_away={"key":"book-away","markets":[{"key":"h2h","outcomes":[{"name":"Milwaukee Bucks","price":2.3}]}]}
+  self.assertEqual(m.normalize_bookmaker_event(EVENT,partial_home,"t"),[])
+  self.assertEqual(m.normalize_bookmaker_event(EVENT,partial_away,"t"),[])
+ def test_rejects_missing_event_identity(self):
+  self.assertEqual(m.normalize_bookmaker_event({"id":"evt1","home_team":"Boston Celtics"},BOOK,"t"),[])
+ def test_rejects_malformed_wrapped_response(self):
+  with self.assertRaises(ValueError): m.normalize_historical_response({"timestamp":"t","data":[]})
+ def test_no_vig_probabilities_sum_to_one(self):
+  rows=m.normalize_bookmaker_event(EVENT,BOOK,"2025-02-01T21:35:00Z")
+  for row in rows:
+   self.assertAlmostEqual(row["home_no_vig_probability"]+row["away_no_vig_probability"],1.0)
 if __name__=="__main__":unittest.main()
