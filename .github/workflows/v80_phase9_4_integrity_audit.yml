@@ -7,6 +7,7 @@ on:
     paths:
       - "scripts/v80_phase9_4_integrity_audit.py"
       - "tests/test_v80_phase9_4_integrity_audit.py"
+      - "tests/test_v80_phase9_normalizer_audit_contract.py"
       - ".github/workflows/v80_phase9_4_integrity_audit.yml"
   workflow_dispatch:
 
@@ -27,9 +28,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile offline auditor
-        run: python -m py_compile scripts/v80_phase9_4_integrity_audit.py tests/test_v80_phase9_4_integrity_audit.py
+        run: python -m py_compile scripts/v80_phase9_4_integrity_audit.py scripts/v80_phase9_price_normalizer.py tests/test_v80_phase9_4_integrity_audit.py tests/test_v80_phase9_normalizer_audit_contract.py
       - name: Run offline integrity tests
-        run: python -m unittest discover -s tests -p "test_v80_phase9_4_integrity_audit.py" -v
+        run: python -m unittest discover -s tests -p "test_v80_phase9*.py" -v
       - name: Confirm no paid API secrets are passed
         run: |
           python - <<'PY'
