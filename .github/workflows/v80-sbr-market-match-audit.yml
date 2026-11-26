@@ -1,0 +1,35 @@
+name: NBA V8.0 SBR 2020-22 Market Match Audit
+
+on:
+  push:
+    branches:
+      - v8.0-calibration-test
+    paths:
+      - 'audit_v80_sbr_market_matches.py'
+      - '.github/workflows/v80-sbr-market-match-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sbr-match-audit:
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: v80-calibration-test
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'psycopg[binary]>=3.2,<4' certifi
+      - run: python -m py_compile audit_v80_sbr_market_matches.py
+      - name: Match MIT SBR odds archive to verified NBA game IDs (read-only)
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python audit_v80_sbr_market_matches.py
