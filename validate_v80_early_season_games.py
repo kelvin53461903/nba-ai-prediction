@@ -2,6 +2,7 @@
 import csv, hashlib, json, sys
 from collections import Counter
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 PATH=Path("data/nba_v80_historical_games_2020_2023.csv")
@@ -34,10 +35,14 @@ def main():
   season=r["season"].strip()
   if season not in EXPECTED: raise RuntimeError(f"Unexpected season {season} at line {n}")
   seasons[season]+=1
-  if r["season_type"] not in {"Regular Season","Playoffs"}: raise RuntimeError(f"Unexpected season type at line {n}")
+  if r["season_type"] not in {"Regular Season","Playoffs","In-Season Tournament Final"}: raise RuntimeError(f"Unexpected season type at line {n}")
   types[r["season_type"]]+=1
   tip=parse(r["commence_time_utc"]); verified=parse(r["verified_at_utc"])
-  expected_type="Regular Season" if tip.date().isoformat()<=REGULAR_END[season] else "Playoffs"
+  game_day=tip.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+  if season=="2023-24" and game_day=="2023-12-09" and {r["home_team"],r["away_team"]}=={"Los Angeles Lakers","Indiana Pacers"}:
+   expected_type="In-Season Tournament Final"
+  else:
+   expected_type="Regular Season" if game_day<=REGULAR_END[season] else "Playoffs"
   if r["season_type"]!=expected_type: raise RuntimeError(f"Season type does not match official calendar at line {n}")
   if tip>=CUTOFF or verified<=tip: raise RuntimeError(f"Cutoff/verification timestamp failure at line {n}")
   hs=int(r["home_score"]); aws=int(r["away_score"])
