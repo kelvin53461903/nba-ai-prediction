@@ -85,6 +85,26 @@ def sbr_day(row: dict) -> date:
     raw = str(int(row["date"]))
     return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
 
+def sbr_close_lines(row: dict) -> tuple[float | None, float | None]:
+    """Repair the known ~7% SBR spread/total column swap using the upstream audited rule."""
+    s = float(row.get("home_close_spread") or 0)
+    t = float(row.get("close_over_under") or 0)
+    if abs(s) <= 40:
+        spread_value = s
+        total_value = t if 150 <= t <= 300 else None
+        return spread_value, total_value
+    if abs(t) <= 40:
+        if t == 0:
+            return 0.0, abs(s) if 150 <= abs(s) <= 300 else None
+        home = float(row.get("home_close_ml") or 0)
+        away = float(row.get("away_close_ml") or 0)
+        if home and away and home != away:
+            spread_value = -abs(t) if home < away else abs(t)
+            total_value = abs(s) if 150 <= abs(s) <= 300 else None
+            return spread_value, total_value
+        return None, abs(s) if 150 <= abs(s) <= 300 else None
+    return None, None
+
 def audit_sbr(games: list[dict]) -> dict:
     path = SOURCE_CACHE / "nba_archive_10Y.json"
     download(SBR_URL, path)
@@ -219,8 +239,8 @@ def audit_sbr(games: list[dict]) -> dict:
         except (TypeError, ValueError, ZeroDivisionError):
             market_counts["invalid_moneyline_pairs"] += 1
         try:
-            spread = float(src.get("home_close_spread"))
-            if spread != 0 and abs(spread) <= 40:
+            spread, repaired_total = sbr_close_lines(src)
+            if spread is not None and abs(spread) <= 40:
                 margin_adjusted = float(game["home_score"]) - float(game["away_score"]) + spread
                 spread_values.append(spread)
                 ats_results["home_cover" if margin_adjusted > 0 else "away_cover" if margin_adjusted < 0 else "push"] += 1
@@ -229,8 +249,8 @@ def audit_sbr(games: list[dict]) -> dict:
         except (TypeError, ValueError):
             market_counts["invalid_or_missing_spread_line"] += 1
         try:
-            total_line = float(src.get("close_over_under"))
-            if 150 <= total_line <= 300:
+            spread_for_total, total_line = sbr_close_lines(src)
+            if total_line is not None and 150 <= total_line <= 300:
                 final_total = float(game["home_score"]) + float(game["away_score"])
                 total_line_values.append(total_line)
                 actual_total_values.append(final_total)
