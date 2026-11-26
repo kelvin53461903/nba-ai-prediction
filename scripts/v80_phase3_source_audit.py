@@ -265,7 +265,28 @@ def audit_sbr(games: list[dict]) -> dict:
     else:
         ml_accuracy = None
         ml_brier = None
+    total_over_rate = (total_results["over"] / sum(total_results.values())) if sum(total_results.values()) else None
+    total_line_mean = (sum(total_line_values) / len(total_line_values)) if total_line_values else None
+    actual_total_mean = (sum(actual_total_values) / len(actual_total_values)) if actual_total_values else None
+    acceptance_reasons = []
+    if ml_brier is None or ml_brier > 0.25:
+        acceptance_reasons.append("de-vigged moneyline Brier score exceeds 0.25 or is unavailable")
+    if total_over_rate is not None and total_over_rate > 0.70:
+        acceptance_reasons.append("over/under settlement is severely imbalanced (>70% over), indicating a likely line-field or parsing problem")
+    if total_line_mean is not None and actual_total_mean is not None and abs(total_line_mean - actual_total_mean) > 15:
+        acceptance_reasons.append("mean total line differs from mean final game total by more than 15 points")
+    if market_counts["invalid_or_missing_spread_line"] > 0 or market_counts["invalid_or_missing_total_line"] > 0:
+        acceptance_reasons.append("some spread/total line rows are missing or outside plausible ranges")
+    market_acceptance = {
+        "status": "REJECTED_PENDING_SOURCE_REPARSE" if acceptance_reasons else "PROVISIONAL_REQUIRES_MANUAL_REVIEW",
+        "reasons": acceptance_reasons,
+        "total_over_rate": round(total_over_rate, 6) if total_over_rate is not None else None,
+        "mean_total_line": round(total_line_mean, 3) if total_line_mean is not None else None,
+        "mean_actual_game_total": round(actual_total_mean, 3) if actual_total_mean is not None else None,
+        "rule": "Do not use this source for model benchmarking or ROI until all market fields and settlement distributions pass review.",
+    }
     market_baseline = {
+        "acceptance": market_acceptance,
         "moneyline": {
             "valid_pairs": len(ml_probs),
             "accuracy": round(ml_accuracy, 6) if ml_accuracy is not None else None,
