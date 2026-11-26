@@ -12,6 +12,8 @@ on:
       - "tests/test_v80_phase4b_sbr_repair_audit.py"
       - "scripts/v80_phase4c_consensus_audit.py"
       - "tests/test_v80_phase4c_consensus_audit.py"
+      - "scripts/v80_phase4d_espn_crosswalk_audit.py"
+      - "tests/test_v80_phase4d_espn_crosswalk_audit.py"
       - ".github/workflows/v80_phase3_source_audit.yml"
 
 permissions:
@@ -36,13 +38,15 @@ jobs:
         run: python -m pip install --disable-pip-version-check duckdb psycopg[binary] certifi requests
       - name: Compile Python files
         run: |
-          python -m py_compile scripts/v80_phase3_source_audit.py tests/test_v80_phase3_source_audit.py scripts/v80_phase4b_sbr_repair_audit.py tests/test_v80_phase4b_sbr_repair_audit.py scripts/v80_phase4c_consensus_audit.py tests/test_v80_phase4c_consensus_audit.py
+          python -m py_compile scripts/v80_phase3_source_audit.py tests/test_v80_phase3_source_audit.py scripts/v80_phase4b_sbr_repair_audit.py tests/test_v80_phase4b_sbr_repair_audit.py scripts/v80_phase4c_consensus_audit.py tests/test_v80_phase4c_consensus_audit.py scripts/v80_phase4d_espn_crosswalk_audit.py tests/test_v80_phase4d_espn_crosswalk_audit.py
       - name: Run parser unit tests
         run: python -m unittest discover -s tests -p "test_v80_phase3_source_audit.py" -v
       - name: Run repaired SBR parser unit tests
         run: python -m unittest discover -s tests -p "test_v80_phase4b_sbr_repair_audit.py" -v
       - name: Run Phase 4C consensus parser tests
         run: python -m unittest discover -s tests -p "test_v80_phase4c_consensus_audit.py" -v
+      - name: Run Phase 4D ESPN crosswalk parser tests
+        run: python -m unittest discover -s tests -p "test_v80_phase4d_espn_crosswalk_audit.py" -v
       - name: Verify isolated database secret is configured
         env:
           V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
@@ -61,6 +65,10 @@ jobs:
         run: python scripts/v80_phase4b_sbr_repair_audit.py
       - name: Run Phase 4C consensus closing-line source audit (read-only)
         run: python scripts/v80_phase4c_consensus_audit.py
+      - name: Run Phase 4D ESPN-to-NBA crosswalk audit (read-only)
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python scripts/v80_phase4d_espn_crosswalk_audit.py
       - name: Upload audit report
         if: always()
         uses: actions/upload-artifact@v4
@@ -70,5 +78,6 @@ jobs:
             artifacts/v80_phase3/
             artifacts/v80_phase4b/
             artifacts/v80_phase4c/
+            artifacts/v80_phase4d/
           if-no-files-found: warn
           retention-days: 30
