@@ -1,0 +1,50 @@
+name: NBA V8.0 Phase 9.4 Offline Historical Quote Integrity
+
+on:
+  push:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase9_4_integrity_audit.py"
+      - "tests/test_v80_phase9_4_integrity_audit.py"
+      - ".github/workflows/v80_phase9_4_integrity_audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-v80-phase9-4-offline-audit
+  cancel-in-progress: false
+
+jobs:
+  offline-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile offline auditor
+        run: python -m py_compile scripts/v80_phase9_4_integrity_audit.py tests/test_v80_phase9_4_integrity_audit.py
+      - name: Run offline integrity tests
+        run: python -m unittest discover -s tests -p "test_v80_phase9_4_integrity_audit.py" -v
+      - name: Confirm no paid API secrets are passed
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          source=Path("scripts/v80_phase9_4_integrity_audit.py").read_text()
+          tree=ast.parse(source)
+          forbidden_imports={"requests","httpx","aiohttp","urllib","socket"}
+          imported=set()
+          for node in ast.walk(tree):
+              if isinstance(node,ast.Import):
+                  imported.update(alias.name.split(".")[0] for alias in node.names)
+              elif isinstance(node,ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".")[0])
+          assert not (imported & forbidden_imports), f"Network-capable imports found: {imported & forbidden_imports}"
+          assert "THE_ODDS_API_KEY" not in source
+          print("PASS: offline audit has no network imports or odds API key dependency")
+          PY
