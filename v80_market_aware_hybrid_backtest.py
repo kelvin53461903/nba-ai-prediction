@@ -34,7 +34,7 @@ def main():
     g.commence_time_utc,g.home_score,g.away_score,g.home_win,
     m.close_home_win_prob,m.close_home_cover_prob,m.close_over_prob,
     m.close_spread_home,m.close_total,m.ats_result,m.total_result
-    FROM public.nba_game_results g JOIN public.nba_historical_market_closes m USING(game_id)
+    FROM public.nba_game_results g LEFT JOIN public.nba_historical_market_closes m USING(game_id)
     WHERE g.season IN ('2024-25','2025-26') AND g.game_status='Final'
     AND g.commence_time_utc < %s::timestamptz ORDER BY g.season,g.commence_time_utc,g.game_id""",(CUTOFF,))
    games=cur.fetchall()
@@ -51,26 +51,28 @@ def main():
   for g in by[season]:
    fr=lookup[season][g["game_id"]]; x=fr["x"]
    margin,total=score_forecast(x)
-   # Only pregame information and closing-market features are used.
-   features={
-    "moneyline":[logit(g["close_home_win_prob"]),logit(fr["elo_p"])],
-    "spread":[logit(g["close_home_cover_prob"]),margin+float(g["close_spread_home"])],
-    "totals":[logit(g["close_over_prob"]),total-float(g["close_total"])]
-   }
-   outcomes={
-    "moneyline":int(bool(g["home_win"])),
-    "spread":int(g["ats_result"]=="home") if g["ats_result"] in ("home","away") else None,
-    "totals":int(g["total_result"]=="over") if g["total_result"] in ("over","under") else None
-   }
    for market in data:
-    y=outcomes[market]
-    if y is None: continue
+    if market=="moneyline":
+     if g["close_home_win_prob"] is None: continue
+     p_market=float(g["close_home_win_prob"])
+     y=int(bool(g["home_win"]))
+     features=[logit(p_market),logit(fr["elo_p"])]
+    elif market=="spread":
+     if g["close_home_cover_prob"] is None or g["close_spread_home"] is None or g["ats_result"] not in ("home","away"): continue
+     p_market=float(g["close_home_cover_prob"])
+     y=int(g["ats_result"]=="home")
+     features=[logit(p_market),margin+float(g["close_spread_home"])]
+    else:
+     if g["close_over_prob"] is None or g["close_total"] is None or g["total_result"] not in ("over","under"): continue
+     p_market=float(g["close_over_prob"])
+     y=int(g["total_result"]=="over")
+     features=[logit(p_market),total-float(g["close_total"])]
     d=data[market]
     if season==TRAIN:
-     d["train_X"].append(features[market]); d["train_y"].append(y)
+     d["train_X"].append(features); d["train_y"].append(y)
     else:
-     d["test_X"].append(features[market]); d["test_y"].append(y)
-     d["test_market"].append(float(g[{"moneyline":"close_home_win_prob","spread":"close_home_cover_prob","totals":"close_over_prob"}[market]]))
+     d["test_X"].append(features); d["test_y"].append(y)
+     d["test_market"].append(p_market)
  report={"status":"EXPERIMENTAL_MARKET_AWARE_HYBRID","train_season":TRAIN,"test_season":TEST,
   "method":"Fit regularized logistic regression on 2024-25 only. Inputs: no-vig consensus closing probability plus an independent pregame feature (Elo for moneyline; score-forecast edge against closing spread/total for the other markets). Evaluate once on untouched 2025-26 matched games.",
   "markets":{},"limitations":"This is a predictive calibration experiment, not an executable betting strategy. Consensus closing lines are not individual bookmaker prices. No ROI or CLV is inferred."}
