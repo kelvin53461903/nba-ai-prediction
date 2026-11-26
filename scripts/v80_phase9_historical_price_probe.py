@@ -15,10 +15,12 @@ import requests
 
 BASE="https://api.the-odds-api.com/v4/historical/sports/basketball_nba"
 SAMPLES=[
- "2021-02-02T00:10:00Z",
- "2023-02-01T23:40:00Z",
- "2025-02-01T21:40:00Z",
- "2026-02-01T20:10:00Z",
+ "2021-01-15T00:10:00Z",
+ "2022-01-15T00:10:00Z",
+ "2023-01-15T00:10:00Z",
+ "2024-01-15T00:10:00Z",
+ "2025-01-15T00:10:00Z",
+ "2026-01-15T00:10:00Z",
 ]
 OUT=Path("artifacts/v80_phase9")
 TIMEOUT=25
@@ -47,11 +49,18 @@ def summarize_markets(payload):
  books=root.get("bookmakers",[]) if isinstance(root,dict) else root if isinstance(root,list) else []
  by_book=[]
  union=set()
+ key_counts={"h2h":0,"spreads":0,"totals":0}
+ complete=0
  for book in books:
   keys=sorted({str(m.get("key")) for m in book.get("markets",[]) if isinstance(m,dict) and m.get("key")})
   union.update(keys)
+  for key in key_counts:
+   if key in keys: key_counts[key]+=1
+  if all(key in keys for key in key_counts): complete+=1
   by_book.append({"bookmaker_key":book.get("key"),"market_keys":keys})
  return {"bookmaker_count":len(by_book),"market_keys_union":sorted(union),
+         "market_key_bookmaker_counts":key_counts,
+         "bookmakers_with_all_three_featured_markets":complete,
          "has_h2h":"h2h" in union,"has_spreads":"spreads" in union,
          "has_totals":"totals" in union,"bookmakers":by_book}
 
