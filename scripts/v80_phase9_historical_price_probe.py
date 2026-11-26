@@ -37,8 +37,13 @@ def get_json(session,url,params):
  return {"ok":True,"http_status":response.status_code,"data":data,
          "credits_remaining":remaining,"credits_used":used}
 
+def unwrap_data(payload):
+ if isinstance(payload,dict) and isinstance(payload.get("data"),list): return payload["data"]
+ if isinstance(payload,list): return payload
+ return []
+
 def summarize_markets(payload):
- books=payload if isinstance(payload,list) else payload.get("data",[]) if isinstance(payload,dict) else []
+ books=unwrap_data(payload)
  by_book=[]
  union=set()
  for book in books:
@@ -63,10 +68,11 @@ def run_probe(api_key,session=None):
    item["coverage_status"]="EVENT_COVERAGE_UNAVAILABLE"
    item["error_excerpt"]=event_resp.get("error_excerpt",event_resp.get("error"))
    results.append(item); continue
-  events=event_resp["data"]
+  events=unwrap_data(event_resp["data"])
   if not isinstance(events,list):
    item["coverage_status"]="UNEXPECTED_EVENTS_SCHEMA"; results.append(item); continue
   item["event_count"]=len(events)
+  item["historical_events_response_keys"]=sorted(event_resp["data"].keys()) if isinstance(event_resp["data"],dict) else []
   if not events:
    item["coverage_status"]="NO_EVENTS_AT_SNAPSHOT"; results.append(item); continue
   # One representative event only: keep the free coverage probe inexpensive.
