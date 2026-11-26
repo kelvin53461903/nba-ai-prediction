@@ -130,14 +130,25 @@ def assign_splits(rows):
  for s in by: by[s].sort(key=lambda x:x["_tip"])
  a,b=by.get("2024-25",[]),by.get("2025-26",[])
  if len(a)<1000 or len(b)<900: raise RuntimeError("Insufficient season coverage")
- da=sorted({r["_tip"].date().isoformat() for r in a}); db=sorted({r["_tip"].date().isoformat() for r in b})
- i,j,k=int(.70*len(da)),int(.85*len(da)),int(.50*len(db))
+ def cuts(items,fractions):
+  counts=defaultdict(int)
+  for r in items: counts[r["_tip"].date().isoformat()]+=1
+  dates=sorted(counts); n=len(items); boundaries=[]
+  for frac in fractions:
+   target=n*frac; cum=0; cut=len(dates)
+   for i,day in enumerate(dates):
+    cum+=counts[day]
+    if cum>=target:
+     cut=i+1; break
+   boundaries.append(cut)
+  return dates,boundaries
+ da,(i,j)=cuts(a,[.70,.85]); db,(k,)=cuts(b,[.50])
  train,cal,val=set(da[:i]),set(da[i:j]),set(da[j:])
  test,hold=set(db[:k]),set(db[k:])
  for r in rows:
   day=r["_tip"].date().isoformat()
   r["split"]="TRAIN" if day in train else "CALIBRATION" if day in cal else "VALIDATION" if day in val else "TEST" if day in test else "FINAL_HOLDOUT" if day in hold else "EXCLUDED"
- return rows,{"2024-25":{"TRAIN_dates":len(train),"CALIBRATION_dates":len(cal),"VALIDATION_dates":len(val)},"2025-26":{"TEST_dates":len(test),"FINAL_HOLDOUT_dates":len(hold)}}
+ return rows,{"2024-25":{"TRAIN_games":sum(r["_tip"].date().isoformat() in train for r in a),"CALIBRATION_games":sum(r["_tip"].date().isoformat() in cal for r in a),"VALIDATION_games":sum(r["_tip"].date().isoformat() in val for r in a)},"2025-26":{"TEST_games":sum(r["_tip"].date().isoformat() in test for r in b),"FINAL_HOLDOUT_games":sum(r["_tip"].date().isoformat() in hold for r in b)}}
 
 def logistic():
  return Pipeline([("prep",ColumnTransformer([
