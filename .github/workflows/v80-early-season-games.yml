@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download previously collected 2020-24 historical CSV artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v4
         with:
           name: v80-early-season-games-2020-2024
           repository: ${{ github.repository }}
@@ -74,7 +74,7 @@ jobs:
         run: python v80_multi_season_walkforward.py
       - name: Upload normalized data and walk-forward report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: v80-early-season-games-2020-2024
           path: |
