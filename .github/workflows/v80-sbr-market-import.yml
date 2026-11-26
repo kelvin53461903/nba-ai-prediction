@@ -8,6 +8,7 @@ on:
       - 'import_v80_sbr_historical_lines.py'
       - 'data/V80_SBR_IMPORT_APPROVED.txt'
       - '.github/workflows/v80-sbr-market-import.yml'
+      - 'v80_database_test.py'
   workflow_dispatch:
     inputs:
       import_mode:
