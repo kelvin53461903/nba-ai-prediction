@@ -170,6 +170,7 @@ def audit_sbr(games: list[dict]) -> dict:
         except (TypeError, ValueError):
             line_quality["unparseable_market_values"] += 1
     invalid_dates = 0
+    ambiguous_date_candidates = 0
     for i, r in enumerate(target):
         home = SBR_TEAMS.get(r.get("home_team"))
         away = SBR_TEAMS.get(r.get("away_team"))
@@ -193,6 +194,12 @@ def audit_sbr(games: list[dict]) -> dict:
             if delta <= 1:
                 matches.append((delta, g))
         if matches:
+            exact = [item for item in matches if item[0] == 0]
+            eligible = exact if exact else matches
+            if len(eligible) != 1:
+                ambiguous_date_candidates += 1
+                continue
+            matches = eligible
             matches.sort(key=lambda x: x[0])
             candidates.append({
                 "source_index": i, "season": season, "date": day.isoformat(),
@@ -394,6 +401,7 @@ def audit_sbr(games: list[dict]) -> dict:
         "closing_market_baseline": market_baseline,
         "unmatched_by_season": dict(unmatched_by_season),
         "candidate_rows_with_multiple_matches": sum(len(c["candidate_game_ids"])>1 for c in candidates),
+        "ambiguous_date_candidate_rows_rejected": ambiguous_date_candidates,
         "assignment_collisions": collisions,
         "unknown_team_rows": sum(unknown_teams.values()),
         "unknown_team_examples": [{"teams":list(k),"rows":v} for k,v in unknown_teams.most_common(10)],
