@@ -7,6 +7,7 @@ on:
     paths:
       - 'collect_v80_early_season_games.py'
       - 'collect_bdl_historical_games.py'
+      - 'validate_v80_early_season_games.py'
       - '.github/workflows/v80-early-season-games.yml'
   workflow_dispatch:
 
@@ -42,11 +43,15 @@ jobs:
         env:
           BDL_API_KEY: ${{ secrets.BDL_API_KEY }}
         run: python collect_v80_early_season_games.py
-      - name: Upload historical games for audit
+      - name: Validate expanded historical CSV
+        run: python validate_v80_early_season_games.py
+      - name: Upload historical games and validation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v80-early-season-games-2020-2024
-          path: data/nba_v80_historical_games_2020_2023.csv
+          path: |
+            data/nba_v80_historical_games_2020_2023.csv
+            v80_early_seasons_validation.json
           if-no-files-found: warn
           retention-days: 30
