@@ -134,6 +134,7 @@ def main():
   "status_counts":dict(counts),
   "by_season":{s:dict(Counter(r["status"] for r in rows if r["season"]==s)) for s in sorted({r["season"] for r in rows})},
   "market_line_link_eligible_count":counts["EXACT_SCORE_AND_SOURCE_ID_PRESENT"],
+  "resolved_rows":rows,
   "unresolved_or_ambiguous":[r for r in rows if r["status"] not in ("EXACT_SCORE_AND_SOURCE_ID_PRESENT","EXACT_SCORE_SOURCE_ID_MISSING")],
   "source_id_missing":[r for r in rows if r["status"]=="EXACT_SCORE_SOURCE_ID_MISSING"],
   "database_writes":0,
