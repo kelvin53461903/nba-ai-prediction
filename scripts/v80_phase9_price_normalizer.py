@@ -8,6 +8,7 @@ price stitching is allowed.
 """
 from __future__ import annotations
 import math
+from datetime import datetime
 
 def _decimal_price(value):
  try: x=float(value)
@@ -87,15 +88,34 @@ def normalize_bookmaker_event(event,bookmaker,snapshot_timestamp):
     "over_no_vig_probability":on,"under_no_vig_probability":un})
  return records
 
+def _iso_timestamp(value,field):
+ if not isinstance(value,str) or not value.strip():
+  raise ValueError(f"Missing {field}")
+ try: parsed=datetime.fromisoformat(value.replace("Z","+00:00"))
+ except ValueError as exc: raise ValueError(f"Invalid ISO-8601 timestamp: {field}") from exc
+ if parsed.tzinfo is None or parsed.utcoffset() is None:
+  raise ValueError(f"Timestamp must include timezone: {field}")
+ return value
+
 def normalize_historical_response(response):
  """Normalize a wrapped historical event odds response into strict paired rows."""
  if not isinstance(response,dict) or not isinstance(response.get("data"),dict):
   raise ValueError("Expected historical event odds wrapper with object data")
- event=response["data"]; snapshot=response.get("timestamp")
- if not snapshot: raise ValueError("Missing historical snapshot timestamp")
+ event=response["data"]
+ snapshot=_iso_timestamp(response.get("timestamp"),"snapshot timestamp")
+ if not event.get("id"): raise ValueError("Missing event ID")
+ if not event.get("home_team") or not event.get("away_team"):
+  raise ValueError("Missing home/away team identity")
+ commence=_iso_timestamp(event.get("commence_time"),"event commence_time")
  bookmakers=event.get("bookmakers")
  if not isinstance(bookmakers,list): raise ValueError("Missing bookmaker list")
  rows=[]
  for bookmaker in bookmakers:
-  rows.extend(normalize_bookmaker_event(event,bookmaker,snapshot))
+  if not isinstance(bookmaker,dict) or not bookmaker.get("key"):
+   continue
+  for row in normalize_bookmaker_event(event,bookmaker,snapshot):
+   row["provider"]="the-odds-api"
+   row["sport_key"]="basketball_nba"
+   row["commence_time"]=commence
+   rows.append(row)
  return rows
