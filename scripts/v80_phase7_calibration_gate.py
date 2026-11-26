@@ -20,7 +20,10 @@ from sklearn.metrics import accuracy_score,brier_score_loss,log_loss,roc_auc_sco
 
 INPUT=Path("artifacts/v80_phase6b/leak_safe_team_form_dataset.json")
 OUT=Path("artifacts/v80_phase7")
-NUM=["home_point","over_under","bookmaker_count","home_favorite",\n "home_prev_win_rate","home_prev_points_for_avg","home_prev_points_against_avg","home_prev_net_points_avg","home_prev_rest_days",\n "away_prev_win_rate","away_prev_points_for_avg","away_prev_points_against_avg","away_prev_net_points_avg","away_prev_rest_days",\n "pregame_net_form_diff","pregame_win_rate_diff","pregame_rest_diff"]
+NUM=["home_point","over_under","bookmaker_count","home_favorite",
+ "home_prev_win_rate","home_prev_points_for_avg","home_prev_points_against_avg","home_prev_net_points_avg","home_prev_rest_days",
+ "away_prev_win_rate","away_prev_points_for_avg","away_prev_points_against_avg","away_prev_net_points_avg","away_prev_rest_days",
+ "pregame_net_form_diff","pregame_win_rate_diff","pregame_rest_diff"]
 CAT=["home_team","away_team"]
 SPECS={"spread":("ats_result","HOME_COVER","AWAY_COVER"),
        "total":("total_result","OVER","UNDER")}
@@ -91,7 +94,7 @@ def main():
  OUT.mkdir(parents=True,exist_ok=True)
  if not INPUT.exists(): raise RuntimeError("Missing Phase 5 benchmark dataset")
  obj=json.loads(INPUT.read_text(encoding="utf-8"))
- if obj.get("report",{}).get("acceptance")!="DATASET_CANDIDATE_FOR_BENCHMARK_ONLY": raise RuntimeError("Phase 5 dataset not accepted")
+ if obj.get("mode")!="LEAK_SAFE_ROLLING_TEAM_FORM_FEATURES" or not isinstance(obj.get("rows"),list) or not obj["rows"]: raise RuntimeError("Phase 6B feature dataset not accepted")
  df=pd.DataFrame(obj["rows"])
  if df.nba_game_id.duplicated().any(): raise RuntimeError("Duplicate NBA game IDs")
  markets={m:run_market(df,m) for m in SPECS}
