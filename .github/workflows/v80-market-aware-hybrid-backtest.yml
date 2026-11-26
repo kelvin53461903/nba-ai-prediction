@@ -1,0 +1,52 @@
+name: NBA V8.0 Market-Aware Hybrid Backtest
+
+on:
+  push:
+    branches:
+      - v8.0-calibration-test
+    paths:
+      - 'v80_market_aware_hybrid_backtest.py'
+      - 'v80_recent_form_backtest.py'
+      - '.github/workflows/v80-market-aware-hybrid-backtest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v80-market-aware-hybrid-backtest
+  cancel-in-progress: false
+
+jobs:
+  market-aware-hybrid:
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: v80-calibration-test
+    steps:
+      - name: Checkout isolated V8.0 test branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install model and secure database dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'psycopg[binary]>=3.2,<4' certifi 'scikit-learn>=1.5,<2' numpy
+      - name: Compile hybrid experiment
+        run: python -m py_compile v80_market_aware_hybrid_backtest.py v80_recent_form_backtest.py
+      - name: Run market-aware three-market hybrid experiment
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python v80_market_aware_hybrid_backtest.py
+      - name: Upload hybrid comparison report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v80-market-aware-hybrid-backtest
+          path: v80_market_aware_hybrid_backtest.json
+          if-no-files-found: warn
+          retention-days: 30
