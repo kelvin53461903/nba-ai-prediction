@@ -112,8 +112,15 @@ def audit_sbr(games: list[dict]) -> dict:
     if not isinstance(rows, list):
         raise RuntimeError("Unexpected SBR archive format: expected a JSON list")
     season_counts = Counter(str(r.get("season")) for r in rows)
-    target = [r for r in rows if r.get("season") in (2020, 2021)
-              and r.get("home_team") != 0 and r.get("away_team") != 0]
+    def valid_target_row(row: dict) -> bool:
+        try:
+            start_year = int(row.get("season"))
+        except (TypeError, ValueError):
+            return False
+        home, away = row.get("home_team"), row.get("away_team")
+        return start_year in (2020, 2021) and str(home).strip() not in ("", "0", "None") and str(away).strip() not in ("", "0", "None")
+
+    target = [r for r in rows if valid_target_row(r)]
     db = defaultdict(list)
     for g in games:
         db[(g["season"], g["home_team"], g["away_team"])].append(g)
