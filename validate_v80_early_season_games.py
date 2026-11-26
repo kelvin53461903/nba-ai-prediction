@@ -6,6 +6,8 @@ from pathlib import Path
 
 PATH=Path("data/nba_v80_historical_games_2020_2023.csv")
 EXPECTED={"2020-21","2021-22","2022-23","2023-24"}
+EXPECTED_REGULAR={"2020-21":1080,"2021-22":1230,"2022-23":1230,"2023-24":1230}
+REGULAR_END={"2020-21":"2021-05-16","2021-22":"2022-04-10","2022-23":"2023-04-09","2023-24":"2024-04-14"}
 CUTOFF=datetime(2026,4,2,tzinfo=timezone.utc)
 REQUIRED={"game_id","season","season_type","home_team_id","away_team_id","home_team","away_team",
  "commence_time_utc","home_score","away_score","total_score","score_margin","home_win",
@@ -35,6 +37,8 @@ def main():
   if r["season_type"] not in {"Regular Season","Playoffs"}: raise RuntimeError(f"Unexpected season type at line {n}")
   types[r["season_type"]]+=1
   tip=parse(r["commence_time_utc"]); verified=parse(r["verified_at_utc"])
+  expected_type="Regular Season" if tip.date().isoformat()<=REGULAR_END[season] else "Playoffs"
+  if r["season_type"]!=expected_type: raise RuntimeError(f"Season type does not match official calendar at line {n}")
   if tip>=CUTOFF or verified<=tip: raise RuntimeError(f"Cutoff/verification timestamp failure at line {n}")
   hs=int(r["home_score"]); aws=int(r["away_score"])
   if hs<0 or aws<0 or hs==aws: raise RuntimeError(f"Invalid final score at line {n}")
@@ -42,7 +46,11 @@ def main():
   if r["home_win"].lower() != str(hs>aws).lower(): raise RuntimeError(f"Winner mismatch at line {n}")
   if r["game_status"]!="Final" or int(r["home_team_id"])==int(r["away_team_id"]): raise RuntimeError(f"Status/team mismatch at line {n}")
  for season in sorted(EXPECTED):
-  if seasons[season]<900: raise RuntimeError(f"Suspiciously low season count for {season}: {seasons[season]}")
+  if seasons[season]<EXPECTED_REGULAR[season]: raise RuntimeError(f"Season count below regular-season minimum for {season}: {seasons[season]}")
+  regular=sum(1 for r in rows if r["season"]==season and r["season_type"]=="Regular Season")
+  playoffs=sum(1 for r in rows if r["season"]==season and r["season_type"]=="Playoffs")
+  if regular!=EXPECTED_REGULAR[season] or playoffs<70:
+   raise RuntimeError(f"Official season coverage mismatch for {season}: regular={regular}, playoffs={playoffs}")
  digest=hashlib.sha256(PATH.read_bytes()).hexdigest()
  result={"status":"PASS","rows":len(rows),"unique_game_ids":len(ids),"season_counts":dict(sorted(seasons.items())),
   "season_type_counts":dict(types),"cutoff_exclusive_utc":CUTOFF.isoformat(),"sha256":digest,
