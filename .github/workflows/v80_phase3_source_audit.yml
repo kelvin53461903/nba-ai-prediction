@@ -1,0 +1,42 @@
+name: NBA V8.0 Phase 3 Historical Odds Source Audit
+
+on:
+  push:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase3_source_audit.py"
+      - ".github/workflows/v80_phase3_source_audit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-v80-phase3-source-audit
+  cancel-in-progress: false
+
+jobs:
+  read-only-source-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout isolated test branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install audit dependencies
+        run: python -m pip install --disable-pip-version-check duckdb psycopg[binary] certifi requests
+      - name: Run read-only source audit
+        env:
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
+        run: python scripts/v80_phase3_source_audit.py
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-v80-phase3-source-audit
+          path: artifacts/v80_phase3/
+          if-no-files-found: warn
+          retention-days: 30
