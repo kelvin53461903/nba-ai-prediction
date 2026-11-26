@@ -1,0 +1,27 @@
+name: NBA V8.0 Phase 9 Price Normalizer Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase9_price_normalizer.py"
+      - "tests/test_v80_phase9_price_normalizer.py"
+      - ".github/workflows/v80_phase9_price_normalizer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-normalizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile normalizer
+        run: python -m py_compile scripts/v80_phase9_price_normalizer.py tests/test_v80_phase9_price_normalizer.py
+      - name: Test strict two-sided market pairing
+        run: python -m unittest discover -s tests -p "test_v80_phase9_price_normalizer.py" -v
