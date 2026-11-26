@@ -39,7 +39,7 @@ def load():
     "commence_time_utc":dt(r["commence_time_utc"]),"home_score":int(r["home_score"]),
     "away_score":int(r["away_score"]),"overtime_periods":int(r["overtime_periods"]) if r.get("overtime_periods","").strip() else None,
     "game_status":r["game_status"].strip(),"source":r["source"].strip(),"verified_at_utc":dt(r["verified_at_utc"])}
-   if row["season"] not in EXPECTED or row["season_type"] not in {"Regular Season","Playoffs"}: raise RuntimeError(f"Unexpected season/type at line {line}")
+   if row["season"] not in EXPECTED or row["season_type"] not in {"Regular Season","Playoffs","In-Season Tournament Final"}: raise RuntimeError(f"Unexpected season/type at line {line}")
    if row["commence_time_utc"]>=CUTOFF or row["verified_at_utc"]<=row["commence_time_utc"]: raise RuntimeError(f"Invalid cutoff/verification at line {line}")
    if row["game_status"]!="Final" or row["home_score"]<0 or row["away_score"]<0 or row["home_score"]==row["away_score"]: raise RuntimeError(f"Invalid final score at line {line}")
    if row["home_team_id"]==row["away_team_id"] or not row["source"]: raise RuntimeError(f"Invalid team/source at line {line}")
