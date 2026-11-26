@@ -161,6 +161,32 @@ def audit_sbr(games: list[dict]) -> dict:
         used.add(gid)
         assigned.append((c, gid))
     matched_by_season = Counter(c["season"] for c, _ in assigned)
+    game_by_id = {g["game_id"]: g for g in games}
+    score_checks = Counter()
+    score_mismatches = []
+    for candidate, game_id in assigned:
+        src = rows[candidate["source_index"]]
+        game = game_by_id[game_id]
+        try:
+            src_home = int(float(src["home_final"]))
+            src_away = int(float(src["away_final"]))
+            db_home = int(game["home_score"])
+            db_away = int(game["away_score"])
+            score_checks["checked"] += 1
+            if (src_home, src_away) == (db_home, db_away):
+                score_checks["exact_match"] += 1
+            else:
+                score_checks["mismatch"] += 1
+                if len(score_mismatches) < 20:
+                    score_mismatches.append({
+                        "game_id": game_id,
+                        "source_date": candidate["date"],
+                        "teams": [candidate["home"], candidate["away"]],
+                        "source_score": [src_home, src_away],
+                        "database_score": [db_home, db_away],
+                    })
+        except (KeyError, TypeError, ValueError):
+            score_checks["missing_or_invalid"] += 1
     unmatched_by_season = Counter()
     for r in target:
         start_year = int(r["season"])
@@ -179,6 +205,11 @@ def audit_sbr(games: list[dict]) -> dict:
         "raw_market_field_quality_counts": dict(line_quality),
         "matched_unique_games": len(assigned),
         "matched_by_season": dict(matched_by_season),
+        "score_validation": {
+            "counts": dict(score_checks),
+            "mismatch_examples": score_mismatches,
+            "rule": "SBR home_final/away_final must exactly equal the isolated NBA game result for the assigned home/away teams",
+        },
         "unmatched_by_season": dict(unmatched_by_season),
         "candidate_rows_with_multiple_matches": sum(len(c["candidate_game_ids"])>1 for c in candidates),
         "assignment_collisions": collisions,
