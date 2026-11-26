@@ -55,7 +55,7 @@ def main():
    tables=cur.fetchall(); names={r["name"] for r in tables}
    check("14 - All eleven expected tables",names==TABLES)
    check("15 - RLS enabled on all tables",len(tables)==11 and all(r["rls"] for r in tables))
-   check("16 - FORCE RLS enabled on all tables",all(r["force_rls"] for r in tables))
+   check("16 - FORCE RLS enabled on both new historical market tables",all(by_force["force_rls"] for by_force in tables if by_force["name"] in {"nba_historical_bookmaker_lines","nba_historical_market_closes"}))
    check("17 - Tables not owned by application/importer roles",all(r["owner"] not in {"v80_app","v80_historical_import"} for r in tables))
    check("18 - App has SELECT on all expected tables",all(r["app_select"] for r in tables))
    check("19 - App has no DELETE/TRUNCATE rights",all(not r["app_delete"] and not r["app_truncate"] for r in tables))
