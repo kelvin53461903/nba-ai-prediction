@@ -24,6 +24,35 @@ class HistoricalOddsAuditHelpersTest(unittest.TestCase):
         self.assertAlmostEqual(module.brier_score([(0.8, 1.0), (0.2, 0.0)]), 0.04)
         self.assertIsNone(module.brier_score([]))
 
+    def test_market_quality_gate_rejects_bad_total_distribution(self):
+        reasons = module.market_quality_rejection_reasons(
+            ml_brier=0.20,
+            score_exact=100,
+            score_mismatch=0,
+            score_missing=0,
+            total_over_rate=0.90,
+            mean_total_line=194.0,
+            mean_actual_total=222.0,
+            invalid_spread_rows=0,
+            invalid_total_rows=0,
+        )
+        self.assertTrue(any("over/under settlement is severely imbalanced" in x for x in reasons))
+        self.assertTrue(any("mean total line differs" in x for x in reasons))
+
+    def test_market_quality_gate_accepts_plausible_synthetic_fixture(self):
+        reasons = module.market_quality_rejection_reasons(
+            ml_brier=0.20,
+            score_exact=100,
+            score_mismatch=0,
+            score_missing=0,
+            total_over_rate=0.51,
+            mean_total_line=222.0,
+            mean_actual_total=222.5,
+            invalid_spread_rows=0,
+            invalid_total_rows=0,
+        )
+        self.assertEqual(reasons, [])
+
     def test_sbr_day_parses_yyyymmdd(self):
         self.assertEqual(
             module.sbr_day({"date": 20250115}).isoformat(),
