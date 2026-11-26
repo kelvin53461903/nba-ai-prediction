@@ -13,6 +13,7 @@ import pathlib
 import sys
 import time
 import requests
+from zoneinfo import ZoneInfo
 
 BASE = "https://api.balldontlie.io/v1/games"
 FIELDS = [
@@ -95,12 +96,15 @@ def fetch_season(session, year, min_interval, max_pages):
                     2022: ("2022-10-18", "2023-04-09", "2023-06-12"),
                     2023: ("2023-10-24", "2024-04-14", "2024-06-17"),
                 }
+                # NBA schedule dates are local to the arena; use Eastern time for the official season calendar.
+                game_day = commence.astimezone(ZoneInfo("America/New_York")).date().isoformat()
                 start_day, regular_end_day, end_day = season_windows[year]
-                game_day = commence.date().isoformat()
                 if not (start_day <= game_day <= end_day):
                     continue
-                # Use the official regular-season end date to avoid labelling play-in games as regular season.
-                season_type = "Regular Season" if game_day <= regular_end_day else "Playoffs"
+                if year == 2023 and game_day == "2023-12-09" and {home.get("full_name"), away.get("full_name")} == {"Los Angeles Lakers", "Indiana Pacers"}:
+                    season_type = "In-Season Tournament Final"
+                else:
+                    season_type = "Regular Season" if game_day <= regular_end_day else "Playoffs"
             rows.append({
                 "game_id": int(game["id"]),
                 "season": season_label(int(game.get("season", year))),
