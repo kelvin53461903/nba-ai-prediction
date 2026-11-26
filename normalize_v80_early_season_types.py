@@ -2,6 +2,7 @@
 import csv, os, sys
 from pathlib import Path
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 PATH=Path("data/nba_v80_historical_games_2020_2023.csv")
 REGULAR_END={"2020-21":"2021-05-16","2021-22":"2022-04-10","2022-23":"2023-04-09","2023-24":"2024-04-14"}
@@ -15,7 +16,11 @@ def main():
   season=row["season"]
   if season not in REGULAR_END: raise RuntimeError(f"Unexpected season: {season}")
   tip=datetime.fromisoformat(row["commence_time_utc"].replace("Z","+00:00"))
-  expected="Regular Season" if tip.date().isoformat()<=REGULAR_END[season] else "Playoffs"
+  game_day=tip.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+  if season=="2023-24" and game_day=="2023-12-09" and {row["home_team"],row["away_team"]}=={"Los Angeles Lakers","Indiana Pacers"}:
+   expected="In-Season Tournament Final"
+  else:
+   expected="Regular Season" if game_day<=REGULAR_END[season] else "Playoffs"
   if row["season_type"]!=expected:
    row["season_type"]=expected; changed+=1
  temp=PATH.with_suffix(".normalized.tmp")
