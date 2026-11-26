@@ -5,10 +5,10 @@ from psycopg.rows import dict_row
 URL="https://raw.githubusercontent.com/flancast90/sportsbookreview-scraper/main/data/nba_archive_10Y.json"
 ALIASES={
 "knicks":"New York Knicks","celtics":"Boston Celtics","nets":"Brooklyn Nets","warriors":"Golden State Warriors",
-"76ers":"Philadelphia 76ers","sixers":"Philadelphia 76ers","lakers":"Los Angeles Lakers","clippers":"LA Clippers",
+"76ers":"Philadelphia 76ers","sixers":"Philadelphia 76ers","seventysixers":"Philadelphia 76ers","lakers":"Los Angeles Lakers","clippers":"LA Clippers",
 "trailblazers":"Portland Trail Blazers","blazers":"Portland Trail Blazers","pelicans":"New Orleans Pelicans",
 "thunder":"Oklahoma City Thunder","jazz":"Utah Jazz","spurs":"San Antonio Spurs","rockets":"Houston Rockets",
-"mavericks":"Dallas Mavericks","grizzlies":"Memphis Grizzlies","timberwolves":"Minnesota Timberwolves","wolves":"Minnesota Timberwolves",
+"mavericks":"Dallas Mavericks","nuggets":"Denver Nuggets","grizzlies":"Memphis Grizzlies","timberwolves":"Minnesota Timberwolves","wolves":"Minnesota Timberwolves",
 "hawks":"Atlanta Hawks","magic":"Orlando Magic","heat":"Miami Heat","bulls":"Chicago Bulls",
 "cavaliers":"Cleveland Cavaliers","cavs":"Cleveland Cavaliers","pistons":"Detroit Pistons","pacers":"Indiana Pacers",
 "bucks":"Milwaukee Bucks","raptors":"Toronto Raptors","suns":"Phoenix Suns","kings":"Sacramento Kings",
@@ -65,6 +65,9 @@ def main():
    g=candidates[0]
    if g["game_id"] in matched: raise RuntimeError(f"duplicate matched game {g['game_id']}")
    spread=float(r["home_close_spread"]);total=float(r["close_over_under"])
+   # Source repository documents that ~7% of SBR rows have close spread and total swapped.
+   if 150<=spread<=300 and abs(total)<=40:
+    spread,total=total,spread
    hm=int(float(r["home_close_ml"]));am=int(float(r["away_close_ml"]))
    if abs(spread)>40 or not 150<=total<=300 or hm==0 or am==0:
     invalid[int(r["season"])]+=1;continue
