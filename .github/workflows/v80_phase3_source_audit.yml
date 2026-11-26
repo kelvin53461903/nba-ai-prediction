@@ -20,7 +20,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: nba-v80-phase3-source-audit
+  # Each audit is read-only and may need a long historical API scan. Avoid
+  # letting a stale run block the newer bounded-concurrency implementation.
+  group: nba-v80-phase3-source-audit-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
