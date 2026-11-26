@@ -76,13 +76,14 @@ def main():
   with c.cursor() as cur:
    cur.execute("SET TRANSACTION READ WRITE");cur.execute("SET LOCAL TIME ZONE 'UTC'");cur.execute("SET LOCAL row_security=on")
    cur.execute("SET LOCAL statement_timeout='180s'");cur.execute("SET LOCAL lock_timeout='10s'")
-   cur.execute("""SELECT current_database(),current_user,session_user,current_setting('transaction_read_only'),
-    (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user),
-    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','INSERT'),
-    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','UPDATE'),
-    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','DELETE'),
-    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','TRUNCATE'),
-    (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='public.nba_historical_bookmaker_lines'::regclass)""")
+   cur.execute("""SELECT current_database() AS db_name,current_user AS current_role,session_user AS login_role,
+    current_setting('transaction_read_only') AS read_only_state,
+    (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user) AS elevated_role,
+    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','INSERT') AS can_insert,
+    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','UPDATE') AS can_update,
+    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','DELETE') AS can_delete,
+    has_table_privilege(current_user,'public.nba_historical_bookmaker_lines','TRUNCATE') AS can_truncate,
+    (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='public.nba_historical_bookmaker_lines'::regclass) AS forced_rls""")
    state=cur.fetchone()
    if tuple(state.values())!=("nba_v80","v80_historical_import","v80_historical_import","off",False,True,False,False,False,True):
     raise RuntimeError(f"Least-privilege/RLS checks failed: {tuple(state.values())}")
