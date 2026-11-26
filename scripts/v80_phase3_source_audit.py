@@ -69,7 +69,7 @@ def load_games() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT game_id::text, season, home_team_id::text, away_team_id::text,
-                       (commence_time_utc AT TIME ZONE 'America/New_York')::date,
+                       (commence_time_utc AT TIME ZONE 'America/New_York')::date AS game_date,
                        home_score, away_score
                 FROM public.nba_game_results
                 WHERE season IN ('2020-21','2021-22','2022-23','2023-24',
