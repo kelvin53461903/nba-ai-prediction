@@ -24,6 +24,7 @@ NUM=["home_point","over_under","bookmaker_count","home_favorite",
  "home_prev_win_rate","home_prev_points_for_avg","home_prev_points_against_avg","home_prev_net_points_avg","home_prev_rest_days",
  "away_prev_win_rate","away_prev_points_for_avg","away_prev_points_against_avg","away_prev_net_points_avg","away_prev_rest_days",
  "pregame_net_form_diff","pregame_win_rate_diff","pregame_rest_diff"]
+BASE_NUM=["home_point","over_under","bookmaker_count","home_favorite"]
 CAT=["home_team","away_team"]
 SPECS={"spread":("ats_result","HOME_COVER","AWAY_COVER"),
        "total":("total_result","OVER","UNDER")}
@@ -62,31 +63,39 @@ def run_market(df,name):
  d=df[df[target].isin([pos,neg])].copy(); d["y"]=(d[target]==pos).astype(int)
  parts={s:d[d.split==s].copy() for s in ["TRAIN","VALIDATION","TEST","FINAL_HOLDOUT"]}
  if any(len(parts[s])<100 for s in parts): raise RuntimeError(f"{name}: insufficient split sample")
- cols=NUM+CAT
- model=build_model().fit(parts["TRAIN"][cols],parts["TRAIN"].y)
- pv=model.predict_proba(parts["VALIDATION"][cols])[:,1]
- # Platt scaling: fit only on the validation predictions, never TEST/HOLDOUT.
- calibrator=LogisticRegression(C=1e6,max_iter=1000).fit(logit(pv),parts["VALIDATION"].y)
- results={}
- for split in ["VALIDATION","TEST","FINAL_HOLDOUT"]:
-  part=parts[split]
-  raw=model.predict_proba(part[cols])[:,1]
-  cal=calibrator.predict_proba(logit(raw))[:,1]
-  results[split]={"uncalibrated":score(part.y,raw),"platt_calibrated":score(part.y,cal),
-   "uncalibrated_reliability":reliability(part.y,raw),
-   "calibrated_reliability":reliability(part.y,cal)}
- test=results["TEST"]; hold=results["FINAL_HOLDOUT"]
- test_improved=test["platt_calibrated"]["brier"] < test["uncalibrated"]["brier"]
- hold_improved=hold["platt_calibrated"]["brier"] < hold["uncalibrated"]["brier"]
- auc_test=test["platt_calibrated"]["auc"]
+ variants={"market_only":BASE_NUM+CAT,"market_plus_form":NUM+CAT}
+ all_results={}
+ for variant,cols in variants.items():
+  model=Pipeline([
+   ("prep",ColumnTransformer([
+    ("num",Pipeline([("impute",SimpleImputer(strategy="median")),("scale",StandardScaler())]),cols[:len(cols)-len(CAT)]),
+    ("teams",OneHotEncoder(handle_unknown="ignore"),CAT)])),
+   ("model",LogisticRegression(max_iter=1500,C=.5))
+  ])
+  model.fit(parts["TRAIN"][cols],parts["TRAIN"].y)
+  pv=model.predict_proba(parts["VALIDATION"][cols])[:,1]
+  calibrator=LogisticRegression(C=1e6,max_iter=1000).fit(logit(pv),parts["VALIDATION"].y)
+  split_results={}
+  for split in ["VALIDATION","TEST","FINAL_HOLDOUT"]:
+   part=parts[split]
+   raw=model.predict_proba(part[cols])[:,1]
+   cal=calibrator.predict_proba(logit(raw))[:,1]
+   split_results[split]={"uncalibrated":score(part.y,raw),"platt_calibrated":score(part.y,cal),
+    "uncalibrated_reliability":reliability(part.y,raw),
+    "calibrated_reliability":reliability(part.y,cal)}
+  all_results[variant]={"feature_columns":cols,"metrics":split_results}
+ base=all_results["market_only"]["metrics"]
+ extended=all_results["market_plus_form"]["metrics"]
+ test_improved=extended["TEST"]["platt_calibrated"]["brier"] < base["TEST"]["platt_calibrated"]["brier"]
+ hold_improved=extended["FINAL_HOLDOUT"]["platt_calibrated"]["brier"] < base["FINAL_HOLDOUT"]["platt_calibrated"]["brier"]
+ auc_test=extended["TEST"]["platt_calibrated"]["auc"]
  adequate_discrimination=auc_test is not None and auc_test>=.52
- return {"model":"LogisticRegression(market consensus line + team identity)",
+ return {"models":all_results,
   "rows_by_split":{k:len(v) for k,v in parts.items()},
-  "metrics":results,
-  "calibration_fit":"Platt scaling fitted on VALIDATION predictions from TRAIN-only model",
-  "test_brier_improved":bool(test_improved),
-  "final_holdout_brier_improved":bool(hold_improved),
-  "test_auc_at_least_0_52":bool(adequate_discrimination),
+  "calibration_fit":"Each variant: Platt scaling fitted on VALIDATION predictions from TRAIN-only model",
+  "form_features_improve_test_brier":bool(test_improved),
+  "form_features_improve_final_holdout_brier":bool(hold_improved),
+  "form_model_test_auc_at_least_0_52":bool(adequate_discrimination),
   "research_gate":"PASS" if test_improved and hold_improved and adequate_discrimination else "FAIL",
   "release_note":"A failed research gate means no probability display in production. Even a pass would not establish profitability without two-way prices and licensing clearance."}
 
