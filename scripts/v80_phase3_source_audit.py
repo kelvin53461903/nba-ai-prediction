@@ -97,6 +97,23 @@ def audit_sbr(games: list[dict]) -> dict:
         db[(g["season"], g["home_team_id"], g["away_team_id"])].append(g)
     candidates = []
     unknown_teams = Counter()
+    line_quality = Counter()
+    source_keys = sorted({k for row in target for k in row.keys()})
+    for row in target:
+        try:
+            s, t = row.get("home_close_spread"), row.get("close_over_under")
+            if s is not None and abs(float(s)) <= 40:
+                line_quality["valid_close_spread_raw"] += 1
+            elif t is not None and abs(float(t)) <= 40:
+                line_quality["spread_in_swapped_column_candidate"] += 1
+            if t is not None and 150 <= abs(float(t)) <= 300:
+                line_quality["valid_close_total_raw"] += 1
+            elif s is not None and 150 <= abs(float(s)) <= 300:
+                line_quality["total_in_swapped_column_candidate"] += 1
+            if row.get("home_close_ml") not in (None, 0) and row.get("away_close_ml") not in (None, 0):
+                line_quality["both_close_moneylines_present"] += 1
+        except (TypeError, ValueError):
+            line_quality["unparseable_market_values"] += 1
     invalid_dates = 0
     for i, r in enumerate(target):
         home = SBR_TEAMS.get(r.get("home_team"))
@@ -158,6 +175,8 @@ def audit_sbr(games: list[dict]) -> dict:
         "json_rows": len(rows),
         "source_season_counts_start_year": dict(sorted(season_counts.items())),
         "target_rows_2020_21_and_2021_22": len(target),
+        "source_field_names": source_keys,
+        "raw_market_field_quality_counts": dict(line_quality),
         "matched_unique_games": len(assigned),
         "matched_by_season": dict(matched_by_season),
         "unmatched_by_season": dict(unmatched_by_season),
