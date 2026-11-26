@@ -62,17 +62,17 @@ jobs:
 
       - name: Verify database secret
         env:
-          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_TEST_DATABASE_URL }}
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
         run: |
-          if [ -z "$V80_TEST_DATABASE_URL" ]; then
+          if [ -z "$V80_HISTORICAL_IMPORT_DATABASE_URL" ]; then
             echo "ERROR: V80 isolated Neon import secret missing"
             exit 1
           fi
-          echo "PASS: V80 database secret available"
+          echo "PASS: V8.0 isolated test-branch secret available"
 
       - name: Run 32 isolated Neon security and application-privilege tests
         env:
-          V80_TEST_DATABASE_URL: ${{ secrets.V80_TEST_DATABASE_URL }}
+          V80_HISTORICAL_IMPORT_DATABASE_URL: ${{ secrets.V80_HISTORICAL_IMPORT_DATABASE_URL }}
         run: |
           python v80_database_test.py
 
