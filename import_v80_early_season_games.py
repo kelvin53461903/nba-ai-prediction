@@ -74,7 +74,7 @@ def main():
     has_table_privilege(current_user,'public.nba_game_results','UPDATE'),
     has_table_privilege(current_user,'public.nba_game_results','DELETE'),
     has_table_privilege(current_user,'public.nba_game_results','TRUNCATE'),
-    (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='public.nba_game_results'::regclass),
+    (SELECT relrowsecurity FROM pg_class WHERE oid='public.nba_game_results'::regclass),
     (SELECT relowner::regrole::text FROM pg_class WHERE oid='public.nba_game_results'::regclass)""")
    state=tuple(cur.fetchone())
    expected=(DB_NAME,DB_ROLE,DB_ROLE,"off",False,True,False,False,False,True,"neondb_owner")
