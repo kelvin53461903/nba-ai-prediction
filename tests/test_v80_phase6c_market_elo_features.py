@@ -29,4 +29,28 @@ class Phase6CTests(unittest.TestCase):
   nxt=next(r for r in x if r["nba_game_id"]=="3")
   self.assertEqual(same["home_elo"],1500.0)
   self.assertNotEqual(nxt["home_elo"],1500.0)
+
+ def test_pre_tip_filter_keeps_only_strictly_earlier_snapshot(self):
+  base=game(10,"2025-01-03","A","B",110,100)
+  rows=[
+   {**base,"closing_snapshot":"2025-01-03T19:59:00Z"},
+   {**base,"nba_game_id":"11","closing_snapshot":"2025-01-03T20:00:00Z"},
+   {**base,"nba_game_id":"12","closing_snapshot":"2025-01-03T20:01:00Z"},
+  ]
+  kept,rejected=m.filter_pre_tip_rows(rows)
+  self.assertEqual([r["nba_game_id"] for r in kept],["10"])
+  self.assertEqual(rejected["snapshot_at_or_after_tip"],2)
+ def test_pre_tip_filter_rejects_timezone_naive_and_missing(self):
+  base=game(20,"2025-01-03","A","B",110,100)
+  rows=[{**base,"closing_snapshot":"2025-01-03T19:59:00"},
+        {**base,"nba_game_id":"21","closing_snapshot":None}]
+  kept,rejected=m.filter_pre_tip_rows(rows)
+  self.assertEqual(kept,[])
+  self.assertEqual(rejected["missing_or_invalid_timestamp"],2)
+ def test_pre_tip_filter_compares_timezone_offsets_as_instants(self):
+  base=game(30,"2025-01-03","A","B",110,100)
+  rows=[{**base,"closing_snapshot":"2025-01-04T04:59:00+09:00"}]
+  kept,rejected=m.filter_pre_tip_rows(rows)
+  self.assertEqual(len(kept),1)
+  self.assertEqual(sum(rejected.values()),0)
 if __name__=="__main__": unittest.main()
