@@ -82,8 +82,16 @@ def main():
    markets=cur.fetchone()
    check("29 - Historical games retained without duplicate IDs",games["n"]>=2459 and games["u"]==games["n"])
    check("30 - 2445 unique consensus market rows retained",markets["n"]==2445 and markets["u"]==2445)
-   cur.execute("SELECT count(*) n FROM public.nba_historical_bookmaker_lines")
-   check("31 - No unverified bookmaker rows imported",cur.fetchone()["n"]==0)
+   cur.execute("""SELECT count(*) n,count(DISTINCT game_id) u,
+    count(*) FILTER (WHERE license_review_status='approved') approved,
+    count(*) FILTER (WHERE license_review_status<>'approved') unapproved,
+    count(*) FILTER (WHERE provider_id='sbr') sbr_rows,
+    count(*) FILTER (WHERE commence_time_utc >= '2026-04-02T00:00:00Z'::timestamptz) after_cutoff
+    FROM public.nba_historical_bookmaker_lines""")
+   lines=cur.fetchone()
+   check("31 - 2,426 MIT SBR rows approved, unique and before cutoff",
+    lines["n"]==2426 and lines["u"]==2426 and lines["approved"]==2426 and
+    lines["unapproved"]==0 and lines["sbr_rows"]==2426 and lines["after_cutoff"]==0)
    cur.execute("SAVEPOINT read_only_probe"); blocked=False
    try:
     cur.execute("""INSERT INTO public.nba_game_results
