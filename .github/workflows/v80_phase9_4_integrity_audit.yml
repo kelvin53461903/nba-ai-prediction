@@ -7,8 +7,10 @@ on:
       - v8.0-phase8-integration-candidate
     paths:
       - "scripts/v80_phase9_4_integrity_audit.py"
+      - "scripts/v80_phase9_price_normalizer.py"
       - "tests/test_v80_phase9_4_integrity_audit.py"
       - "tests/test_v80_phase9_normalizer_audit_contract.py"
+      - "tests/test_v80_phase9_price_normalizer.py"
       - ".github/workflows/v80_phase9_4_integrity_audit.yml"
   workflow_dispatch:
 
