@@ -3,9 +3,11 @@
 from __future__ import annotations
 import json, math, sys
 from pathlib import Path
+import os
+import certifi
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import tuple_row
-from v80_database import get_connection_config
 
 TRAIN_SEASON="2024-25"
 TEST_SEASON="2025-26"
@@ -58,9 +60,11 @@ def metrics(ps,ys):
   bins.append({"range":f"{lo:.1f}-{hi:.1f}","n":len(idx),"mean_probability":round(mp,4),"observed_rate":round(rate,4)})
  return {"n":n,"brier":round(brier,6),"log_loss":round(ll,6),"directional_accuracy":round(acc,6),"ece_10_bins":round(ece,6),"calibration_bins":bins}
 def main():
- cfg=get_connection_config()
- cfg["row_factory"]=tuple_row
- conn=psycopg.connect(**cfg)
+ raw=os.environ.get("V80_HISTORICAL_IMPORT_DATABASE_URL","").strip()
+ if not raw: raise RuntimeError("Missing isolated V8.0 Neon connection secret")
+ cfg=conninfo_to_dict(raw)
+ if cfg.get("dbname")!="nba_v80" or cfg.get("user")!="v80_historical_import" or not cfg.get("host","").endswith("neon.tech"): raise RuntimeError("Benchmark must use isolated nba_v80 / v80_historical_import role")
+ conn=psycopg.connect(host=cfg["host"],port=int(cfg.get("port","5432")),dbname="nba_v80",user="v80_historical_import",password=cfg.get("password"),sslmode="verify-full",sslrootcert=certifi.where(),channel_binding="require",connect_timeout=15,application_name="NBA_AI_V80_MARKET_BACKTEST",row_factory=tuple_row)
  try:
   if not conn.pgconn.ssl_in_use: raise RuntimeError("TLS not active")
   with conn.cursor() as cur:
@@ -71,7 +75,7 @@ def main():
     current_setting('transaction_read_only'),
     (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user)""")
    state=cur.fetchone()
-   if tuple(state)!=("nba_v80","v80_app","on",False): raise RuntimeError(f"Read-only app role verification failed: {tuple(state)}")
+   if tuple(state)!=("nba_v80","v80_historical_import","on",False): raise RuntimeError(f"Read-only isolated import-role verification failed: {tuple(state)}")
    cur.execute("""SELECT m.season,m.close_home_win_prob,m.close_home_cover_prob,m.close_over_prob,
       (m.home_score>m.away_score) AS home_win,
       (m.ats_result='home') AS home_cover,m.ats_result,
