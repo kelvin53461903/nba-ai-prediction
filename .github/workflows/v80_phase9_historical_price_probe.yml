@@ -1,0 +1,45 @@
+name: NBA V8.0 Phase 9 Free Historical Price Coverage Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase9_historical_price_probe.py"
+      - "tests/test_v80_phase9_historical_price_probe.py"
+      - ".github/workflows/v80_phase9_historical_price_probe.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-v80-phase9-coverage-probe
+  cancel-in-progress: false
+
+jobs:
+  coverage-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install probe dependency
+        run: python -m pip install --disable-pip-version-check requests
+      - name: Compile Phase 9 probe
+        run: python -m py_compile scripts/v80_phase9_historical_price_probe.py tests/test_v80_phase9_historical_price_probe.py
+      - name: Run Phase 9 unit tests
+        run: python -m unittest discover -s tests -p "test_v80_phase9_historical_price_probe.py" -v
+      - name: Probe free historical coverage only
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: python scripts/v80_phase9_historical_price_probe.py
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-v80-phase9-historical-price-coverage
+          path: artifacts/v80_phase9/historical_price_coverage_probe.json
+          if-no-files-found: error
+          retention-days: 30
