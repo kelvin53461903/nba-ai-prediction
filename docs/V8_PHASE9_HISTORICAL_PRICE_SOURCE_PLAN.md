@@ -68,3 +68,31 @@ Validation rules:
 5. Historical event-to-NBA game matching and price integrity are independently audited.
 6. Only then build an isolated historical price dataset and run walk-forward ROI/CLV.
 7. Production integration remains disabled until independent review and all market-specific gates pass.
+
+
+## Phase 9 live coverage probe result (2026-11-26)
+
+The free coverage-only workflow completed successfully (Run 45809601042). Four representative snapshots were checked near game start. Each historical events request returned NBA events; each historical event-markets response returned featured market keys.
+
+| Snapshot UTC | Events in snapshot | Bookmakers on sampled event | Bookmakers listing all h2h + spreads + totals |
+|---|---:|---:|---:|
+| 2021-02-02 00:10 | 11 | 7 | 3 |
+| 2023-02-01 23:40 | 11 | 19 | 18 |
+| 2025-02-01 21:40 | 13 | 9 | 9 |
+| 2026-02-01 20:10 | 10 | 11 | 11 |
+
+This confirms that the free coverage endpoints can discover historical NBA events and that all three featured market keys were listed for at least one bookmaker at each sampled event. It does **not** prove complete season-wide coverage or provide any price/line values. The paid historical odds endpoint was not called; no historical prices were downloaded.
+
+## Phase 9 price-normalizer implementation
+
+- Added a pure, offline normalizer for a future approved historical odds snapshot.
+- Moneyline must contain exactly the home and away outcomes.
+- Spread must contain both teams with opposite points and valid decimal prices.
+- Total must contain Over and Under at exactly the same point and valid decimal prices.
+- Prices are de-vigged only as paired outcomes from the same bookmaker and market snapshot.
+- The normalizer rejects incomplete, malformed, or cross-line pairs.
+- Unit tests and GitHub Actions workflow passed (Run 45809934570).
+
+## Next dependency
+
+The provider's historical odds prices endpoint is paid-plan only and the documented usage cost is 10 credits per returned market per region. A single event request returning all three featured markets in one region can therefore cost up to 30 credits. No paid request should be made until the account's historical-odds entitlement and subscription cost are confirmed and the user explicitly approves a paid sample. The current workflow remains coverage-only.
