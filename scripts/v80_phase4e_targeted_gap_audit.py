@@ -53,11 +53,10 @@ def db_rows():
      home_score,away_score
     FROM public.nba_game_results
     WHERE (commence_time_utc AT TIME ZONE 'America/New_York')::date='2022-12-01'
-       OR (season IN ('2020-21','2021-22') AND (
-          (home_team='Portland Trail Blazers' AND away_team='Houston Rockets' AND (commence_time_utc AT TIME ZONE 'America/New_York')::date='2020-12-26')
-          OR (home_team='Memphis Grizzlies' AND away_team='Brooklyn Nets' AND (commence_time_utc AT TIME ZONE 'America/New_York')::date='2021-01-08')
-          OR (home_team='Philadelphia 76ers' AND away_team='Denver Nuggets' AND (commence_time_utc AT TIME ZONE 'America/New_York')::date='2021-01-09')
-       ))
+       OR game_id::text IN (
+          '127530','127624','127639','157585','127681','127693',
+          '127707','127750','127826','264524','473871','857572'
+       )
     ORDER BY commence_time_utc
    """)
    names=[d.name for d in cur.description]
