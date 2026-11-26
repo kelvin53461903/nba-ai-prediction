@@ -9,6 +9,21 @@ spec.loader.exec_module(module)
 
 
 class HistoricalOddsAuditHelpersTest(unittest.TestCase):
+    def test_american_odds_conversion(self):
+        self.assertAlmostEqual(module.american_to_implied_probability(-150), 0.6)
+        self.assertAlmostEqual(module.american_to_implied_probability(130), 100 / 230)
+        with self.assertRaises(ValueError):
+            module.american_to_implied_probability(0)
+
+    def test_two_way_devig_normalizes_probabilities(self):
+        home, away = module.devig_two_way(-150, 130)
+        self.assertAlmostEqual(home + away, 1.0)
+        self.assertGreater(home, 0.5)
+
+    def test_brier_score(self):
+        self.assertAlmostEqual(module.brier_score([(0.8, 1.0), (0.2, 0.0)]), 0.04)
+        self.assertIsNone(module.brier_score([]))
+
     def test_sbr_day_parses_yyyymmdd(self):
         self.assertEqual(
             module.sbr_day({"date": 20250115}).isoformat(),
