@@ -85,8 +85,20 @@ def main():
    if cur.fetchone()[0]!=1: raise RuntimeError("Cutoff RLS policy missing")
    cur.execute("SELECT count(*) FROM public.nba_game_results WHERE season = ANY(%s)",(list(EXPECTED),))
    preexisting=cur.fetchone()[0]
-   if preexisting: raise RuntimeError(f"Early-season rows already exist ({preexisting}); refusing duplicate batch")
-   cur.executemany(INSERT_SQL,rows)
+   if preexisting==0:
+    cur.executemany(INSERT_SQL,rows)
+    print(f"PASS: inserted {len(rows)} new early-season rows",flush=True)
+   elif preexisting==len(rows):
+    ids=[r["game_id"] for r in rows]
+    cur.execute("""SELECT game_id,season,home_team_id,away_team_id,commence_time_utc,home_score,away_score
+     FROM public.nba_game_results WHERE game_id = ANY(%s)""",(ids,))
+    existing={r[0]:(r[1],r[2],r[3],r[4],r[5],r[6]) for r in cur.fetchall()}
+    for r in rows:
+     expected=(r["season"],r["home_team_id"],r["away_team_id"],r["commence_time_utc"],r["home_score"],r["away_score"])
+     if existing.get(r["game_id"])!=expected: raise RuntimeError(f"Existing game row differs from validated source: {r['game_id']}")
+    print(f"PASS: {len(rows)} matching early-season rows already present; verified and skipped duplicate insert",flush=True)
+   else:
+    raise RuntimeError(f"Partial early-season batch already exists ({preexisting}/{len(rows)}); refusing mixed import")
    cur.execute("SELECT season,count(*),count(DISTINCT game_id) FROM public.nba_game_results WHERE season = ANY(%s) GROUP BY season ORDER BY season",(list(EXPECTED),))
    after={r[0]:(r[1],r[2]) for r in cur.fetchall()}
    for s,n in counts.items():
