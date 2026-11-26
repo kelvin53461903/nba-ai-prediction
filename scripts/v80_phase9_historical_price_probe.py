@@ -38,7 +38,7 @@ def get_json(session,url,params):
          "credits_remaining":remaining,"credits_used":used}
 
 def unwrap_data(payload):
- if isinstance(payload,dict) and isinstance(payload.get("data"),list): return payload["data"]
+ if isinstance(payload,dict) and "data" in payload: return payload["data"]
  if isinstance(payload,list): return payload
  return []
 
