@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -143,19 +143,33 @@ def main() -> None:
     source_by_id = {str(event_id): commence for event_id, commence in source_rows}
     db_games = load_db_games()
     dates = sorted({str(g["game_date"]) for g in db_games})
-    session = requests.Session()
-    session.headers.update({"User-Agent": "NBA-AI-V8.0-historical-audit/1.0"})
+    def fetch_one(day: str) -> tuple[str, list[dict], str | None]:
+        session = requests.Session()
+        session.headers.update({"User-Agent": "NBA-AI-V8.0-historical-audit/1.0"})
+        try:
+            response = session.get(API, params={"dates": day.replace("-", ""), "limit": 500}, timeout=25)
+            response.raise_for_status()
+            return day, scoreboard_event_rows(response.json()), None
+        except Exception as exc:
+            return day, [], f"{type(exc).__name__}: {exc}"
+        finally:
+            session.close()
+
     event_by_id = {}
     failed_dates = []
-    for idx, day in enumerate(dates, 1):
-        try:
-            for event in fetch_scoreboard(day, session):
-                event_by_id[event["event_id"]] = event
-        except Exception as exc:
-            failed_dates.append({"date": day, "error": f"{type(exc).__name__}: {exc}"})
-        if idx % 20 == 0:
-            print(f"ESPN scoreboard dates processed: {idx}/{len(dates)}")
-        time.sleep(0.10)
+    # Historical coverage spans more than 1,000 calendar dates. Fetch a small
+    # bounded batch concurrently rather than serially holding a 25-minute job.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(fetch_one, day) for day in dates]
+        for idx, future in enumerate(as_completed(futures), 1):
+            day, events, error = future.result()
+            if error:
+                failed_dates.append({"date": day, "error": error})
+            for event in events:
+                if event["event_id"]:
+                    event_by_id[event["event_id"]] = event
+            if idx % 100 == 0:
+                print(f"ESPN scoreboard dates processed: {idx}/{len(dates)}")
 
     counts = Counter()
     rows = []
