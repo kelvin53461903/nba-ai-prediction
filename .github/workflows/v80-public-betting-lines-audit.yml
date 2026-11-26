@@ -1,0 +1,49 @@
+name: NBA V8.0 Public Multi-Provider Betting Lines Audit
+
+on:
+  push:
+    branches:
+      - v8.0-calibration-test
+    paths:
+      - 'v80_public_betting_lines_audit.py'
+      - 'data/nba_v80_historical_games_cutoff_2026-04-01.csv'
+      - '.github/workflows/v80-public-betting-lines-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v80-public-betting-lines-audit
+  cancel-in-progress: false
+
+jobs:
+  audit-public-lines:
+    if: github.ref == 'refs/heads/v8.0-calibration-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout isolated V8.0 test branch
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Parquet audit dependency
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'duckdb>=1.4,<2'
+      - name: Compile audit script
+        run: python -m py_compile v80_public_betting_lines_audit.py
+      - name: Audit public 2024-25 and 2025-26 betting lines
+        run: python v80_public_betting_lines_audit.py
+      - name: Upload public betting lines audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v80-public-multi-provider-betting-lines-audit
+          path: v80_public_betting_lines_audit.json
+          if-no-files-found: warn
+          retention-days: 30
