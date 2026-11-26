@@ -1,0 +1,43 @@
+name: NBA V8.0 Phase 9.4 Offline Historical Quote Integrity
+
+on:
+  push:
+    branches:
+      - v8.0-phase2-historical-market-audit
+    paths:
+      - "scripts/v80_phase9_4_integrity_audit.py"
+      - "tests/test_v80_phase9_4_integrity_audit.py"
+      - ".github/workflows/v80_phase9_4_integrity_audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-v80-phase9-4-offline-audit
+  cancel-in-progress: false
+
+jobs:
+  offline-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile offline auditor
+        run: python -m py_compile scripts/v80_phase9_4_integrity_audit.py tests/test_v80_phase9_4_integrity_audit.py
+      - name: Run offline integrity tests
+        run: python -m unittest discover -s tests -p "test_v80_phase9_4_integrity_audit.py" -v
+      - name: Confirm no paid API secrets are passed
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          source=Path("scripts/v80_phase9_4_integrity_audit.py").read_text()
+          tree=ast.parse(source)
+          calls=[n for n in ast.walk(tree) if isinstance(n,ast.Call)]
+          assert not any(isinstance(n.func,ast.Attribute) and n.func.attr in {"get","post","request"} for n in calls)
+          print("PASS: offline audit contains no HTTP request calls")
+          PY
