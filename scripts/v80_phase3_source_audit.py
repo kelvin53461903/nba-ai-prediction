@@ -34,18 +34,17 @@ ODDS_API_URL = (
     "nba/betting_lines/closing_lines_odds_api.parquet"
 )
 SBR_TEAMS = {
-    "Hawks":"1610612737","Celtics":"1610612738","Pelicans":"1610612740",
-    "Bulls":"1610612741","Cavaliers":"1610612739","Mavericks":"1610612742",
-    "Nuggets":"1610612743","Pistons":"1610612765","Warriors":"1610612744",
-    "Golden State":"1610612744","Rockets":"1610612745","Pacers":"1610612754",
-    "Clippers":"1610612746","LA Clippers":"1610612746","Lakers":"1610612747",
-    "Grizzlies":"1610612763","Heat":"1610612748","Bucks":"1610612749",
-    "Timberwolves":"1610612750","Nets":"1610612751","NewJersey":"1610612751",
-    "Knicks":"1610612752","Thunder":"1610612760","Oklahoma City":"1610612760",
-    "Magic":"1610612753","Seventysixers":"1610612755","Suns":"1610612756",
-    "Trailblazers":"1610612757","Kings":"1610612758","Spurs":"1610612759",
-    "Raptors":"1610612761","Jazz":"1610612762","Wizards":"1610612764",
-    "Hornets":"1610612766",
+    "Hawks":"Atlanta Hawks","Celtics":"Boston Celtics","Nets":"Brooklyn Nets",
+    "Hornets":"Charlotte Hornets","Bulls":"Chicago Bulls","Cavaliers":"Cleveland Cavaliers",
+    "Mavericks":"Dallas Mavericks","Nuggets":"Denver Nuggets","Pistons":"Detroit Pistons",
+    "Warriors":"Golden State Warriors","Rockets":"Houston Rockets","Pacers":"Indiana Pacers",
+    "Clippers":"LA Clippers","Lakers":"Los Angeles Lakers","Grizzlies":"Memphis Grizzlies",
+    "Heat":"Miami Heat","Bucks":"Milwaukee Bucks","Timberwolves":"Minnesota Timberwolves",
+    "Pelicans":"New Orleans Pelicans","Knicks":"New York Knicks","Thunder":"Oklahoma City Thunder",
+    "Magic":"Orlando Magic","Seventysixers":"Philadelphia 76ers","76ers":"Philadelphia 76ers",
+    "Suns":"Phoenix Suns","Trailblazers":"Portland Trail Blazers","Kings":"Sacramento Kings",
+    "Spurs":"San Antonio Spurs","Raptors":"Toronto Raptors","Jazz":"Utah Jazz","Wizards":"Washington Wizards",
+    "NewJersey":"Brooklyn Nets","Seattle":"Oklahoma City Thunder",
 }
 
 def download(url: str, path: Path) -> None:
@@ -70,7 +69,7 @@ def load_games() -> list[dict]:
     ) as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT game_id::text, season, home_team_id::text, away_team_id::text,
+                SELECT game_id::text, season, home_team, away_team,
                        (commence_time_utc AT TIME ZONE 'America/New_York')::date AS game_date,
                        home_score, away_score
                 FROM public.nba_game_results
@@ -96,7 +95,7 @@ def audit_sbr(games: list[dict]) -> dict:
               and r.get("home_team") != 0 and r.get("away_team") != 0]
     db = defaultdict(list)
     for g in games:
-        db[(g["season"], g["home_team_id"], g["away_team_id"])].append(g)
+        db[(g["season"], g["home_team"], g["away_team"])].append(g)
     candidates = []
     unknown_teams = Counter()
     line_quality = Counter()
@@ -134,7 +133,7 @@ def audit_sbr(games: list[dict]) -> dict:
         for g in games:
             if g["season"] != season:
                 continue
-            if g["home_team_id"] != home or g["away_team_id"] != away:
+            if g["home_team"] != home or g["away_team"] != away:
                 continue
             delta = abs((g["game_date"] - day).days)
             if delta <= 1:
