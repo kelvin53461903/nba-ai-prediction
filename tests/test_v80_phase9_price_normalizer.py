@@ -47,5 +47,8 @@ class PriceNormalizerTests(unittest.TestCase):
  def test_no_vig_probabilities_sum_to_one(self):
   rows=m.normalize_bookmaker_event(EVENT,BOOK,"2025-02-01T21:35:00Z")
   for row in rows:
-   self.assertAlmostEqual(row["home_no_vig_probability"]+row["away_no_vig_probability"],1.0)
+   if row["market"]=="totals":
+    self.assertAlmostEqual(row["over_no_vig_probability"]+row["under_no_vig_probability"],1.0)
+   else:
+    self.assertAlmostEqual(row["home_no_vig_probability"]+row["away_no_vig_probability"],1.0)
 if __name__=="__main__":unittest.main()
