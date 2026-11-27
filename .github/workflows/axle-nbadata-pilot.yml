@@ -1,0 +1,38 @@
+name: AXLE NBA Data v2 audit
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/axle-nbadata-pilot.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyarrow
+      - name: Download documented archive
+        run: |
+          for year in 2025 2026; do
+            for dataset in games team_game_logs; do
+              curl -fL --max-time 60 "https://basketball-data.billmill.org/nba/stats/$dataset/season=$year/data.parquet" -o "${dataset}_$year.parquet"
+            done
+          done
+          sha256sum *.parquet
+      - name: Inspect schema and coverage
+        run: |
+          python - <<'PY'
+          import pyarrow.parquet as pq
+          from collections import Counter
+          for y in (2025,2026):
+              g=pq.ParquetFile(f"games_{y}.parquet").read()
+              t=pq.ParquetFile(f"team_game_logs_{y}.parquet").read()
+              print(y,g.schema,t.schema,flush=True)
+              print("Game types",Counter(g["game_type"].to_pylist()))
+              print("Team records",t.num_rows,"Game IDs",len(set(t["game_id"].to_pylist())))
+              assert len(set(g["game_id"].to_pylist()))==g.num_rows
+              assert len(set(zip(t["game_id"].to_pylist(),t["team_id"].to_pylist())))==t.num_rows
+          PY
