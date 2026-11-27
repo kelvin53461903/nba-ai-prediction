@@ -22,6 +22,22 @@ class MarketBacktestTests(unittest.TestCase):
         self.assertLess(max(r['game_date'] for r in train),min(r['game_date'] for r in test))
         self.assertEqual(len(test),6)
 
+    def test_split_never_separates_markets_from_same_game_date(self):
+        data=rows()
+        # Uneven slate sizes previously allowed a row-count split through one date.
+        data=[r for r in data if not (r['game_id']=='g7' and r['market']=='spread')]
+        train,test=m.chronological_holdout(data,0.2)
+        train_dates={r['game_date'] for r in train}
+        test_dates={r['game_date'] for r in test}
+        self.assertFalse(train_dates & test_dates)
+        self.assertEqual(max(train_dates),'2026-11-08')
+        self.assertEqual(min(test_dates),'2026-11-09')
+
+    def test_rejects_game_id_with_inconsistent_date(self):
+        data=rows()
+        data[1]['game_date']='2026-11-12'
+        self.assertTrue(any('inconsistent game_date' in e for e in m.validate_prediction_rows(data)))
+
     def test_scores_all_three_markets_against_market_baseline(self):
         result=m.compare_model_to_market(rows(),0.2)
         self.assertEqual(set(result['markets']),{'moneyline','spread','total'})
@@ -51,5 +67,10 @@ class MarketBacktestTests(unittest.TestCase):
 
     def test_rejects_invalid_holdout_fraction(self):
         with self.assertRaises(ValueError): m.chronological_holdout(rows(),0.8)
+
+    def test_rejects_single_date_holdout(self):
+        data=rows()
+        for row in data: row['game_date']='2026-11-01'
+        with self.assertRaises(ValueError): m.chronological_holdout(data,0.2)
 
 if __name__=='__main__': unittest.main()
