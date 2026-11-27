@@ -16,4 +16,5 @@ jobs:
       - run: pip install pyarrow
       - run: python -m unittest -v axle_holdout_test
 
+      - run: python axle_holdout_settle.py
       - run: python axle_holdout_ingest.py
