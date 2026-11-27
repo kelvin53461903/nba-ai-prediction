@@ -2,7 +2,7 @@ name: AXLE NBA Data v2 audit
 on:
   pull_request:
     branches: [main]
-    paths: [.github/workflows/axle-nbadata-pilot.yml]
+    paths: [.github/workflows/axle-nbadata-pilot.yml, axle_nbadata_match.py]
 permissions:
   contents: read
 jobs:
@@ -10,6 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: v8.0-calibration-test
+          path: historical-source
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -36,3 +44,12 @@ jobs:
               assert len(set(g["game_id"].to_pylist()))==g.num_rows
               assert len(set(zip(t["game_id"].to_pylist(),t["team_id"].to_pylist())))==t.num_rows
           PY
+      - name: Reconcile historical games
+        run: python axle_nbadata_match.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nbadata-match-audit
+          path: nbadata_match_audit.json
+          if-no-files-found: warn
+          retention-days: 7
