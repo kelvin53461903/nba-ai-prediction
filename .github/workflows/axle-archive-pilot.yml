@@ -25,7 +25,7 @@ jobs:
       - name: Download temporary research inputs
         run: |
           curl -fL --max-time 90 https://raw.githubusercontent.com/sportsdataverse/hoopR-nba-stats-data/main/nba_stats/nba_stats_schedule_master.parquet -o schedule.parquet
-          curl -fL --max-time 60 https://api.github.com/repos/sportsdataverse/hoopR-nba-stats-data/releases/tags/nba_stats_team_boxscores -o release.json
+          curl -fL --max-time 60 https://api.github.com/repos/sportsdataverse/sportsdataverse-data/releases/tags/nba_stats_team_boxscores -o release.json
           python - <<'PY'
           import json, subprocess
           assets=json.load(open("release.json"))["assets"]
