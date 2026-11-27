@@ -15,3 +15,5 @@ jobs:
           python-version: '3.12'
       - run: pip install pyarrow
       - run: python -m unittest -v axle_holdout_test
+
+      - run: python axle_holdout_ingest.py
