@@ -46,7 +46,7 @@ These outputs are retrospective reconstructed probabilities, not predictions cap
 ## Release decision
 
 - Corrected feature coverage and timestamp gate: PASS.
-- Research model training and calibration pipeline: implemented; synthetic tests pending CI.
+- Research model training and calibration pipeline: implemented; 6 synthetic unit tests and Python compilation: PASS (GitHub Actions).
 - Model vs closing market: no robust edge.
 - Point-in-time opening quote provenance: NOT VERIFIED.
 - ROI / CLV: NOT CALCULATED.
