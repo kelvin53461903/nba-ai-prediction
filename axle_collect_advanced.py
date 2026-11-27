@@ -32,9 +32,18 @@ def main():
     a=p.parse_args()
     cutoff=date.fromisoformat(a.cutoff)
     if cutoff>=datetime.now(timezone.utc).date(): raise ValueError("Cutoff must be historical")
-    endpoint=leaguedashteamstats.LeagueDashTeamStats(season=a.season,
-        season_type_all_star="Regular Season",measure_type_detailed_defense="Advanced",
-        date_to_nullable=cutoff.strftime("%m/%d/%Y"),league_id_nullable="00",timeout=30)
+    from requests.exceptions import Timeout, ConnectionError
+    import time
+    for attempt, timeout in enumerate((60, 90), 1):
+        try:
+            endpoint=leaguedashteamstats.LeagueDashTeamStats(season=a.season,
+                season_type_all_star="Regular Season",measure_type_detailed_defense="Advanced",
+                date_to_nullable=cutoff.strftime("%m/%d/%Y"),league_id_nullable="00",timeout=timeout)
+            break
+        except (Timeout, ConnectionError) as exc:
+            print(f"Official NBA request {attempt}/2 failed: {type(exc).__name__}", flush=True)
+            if attempt == 2: raise
+            time.sleep(15)
     payload=endpoint.get_dict()
     params=payload.get("parameters",{})
     if params.get("DateTo")!=cutoff.strftime("%m/%d/%Y") or params.get("Season")!=a.season or params.get("MeasureType")!="Advanced":
