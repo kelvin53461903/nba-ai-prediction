@@ -25,9 +25,18 @@ jobs:
       - name: Download temporary research inputs
         run: |
           curl -fL --max-time 90 https://raw.githubusercontent.com/sportsdataverse/hoopR-nba-stats-data/main/nba_stats/nba_stats_schedule_master.parquet -o schedule.parquet
-          for season in 2025 2026; do
-            curl -fL --max-time 90 "https://github.com/sportsdataverse/hoopR-nba-stats-data/releases/download/nba_stats_team_boxscores/team_boxscores_${season}.parquet" -o "box_${season}.parquet"
-          done
+          curl -fL --max-time 60 https://api.github.com/repos/sportsdataverse/hoopR-nba-stats-data/releases/tags/nba_stats_team_boxscores -o release.json
+          python - <<'PY'
+          import json, subprocess
+          assets=json.load(open("release.json"))["assets"]
+          print("Published assets:", [a["name"] for a in assets])
+          for year in (2025,2026):
+              matches=[a for a in assets if a["name"] in (f"team_boxscores_{year}.parquet",f"nba_team_boxscores_{year}.parquet",f"nba_stats_team_boxscores_{year}.parquet")]
+              if len(matches)!=1: raise ValueError(f"Unresolved asset for {year}")
+              url=matches[0]["browser_download_url"]
+              print(url,flush=True)
+              subprocess.run(["curl","-fL","--max-time","90",url,"-o",f"box_{year}.parquet"],check=True)
+          PY
       - name: Reconcile archive
         run: |
           python -m py_compile axle_archive.py
