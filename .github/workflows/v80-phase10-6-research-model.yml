@@ -1,0 +1,31 @@
+name: NBA V8.0 Phase 10.6 Research Model Tests
+on:
+  push:
+    branches:
+      - v8.0-phase10.6-research-model
+    paths:
+      - 'scripts/v80_phase10_6_research_model.py'
+      - 'tests/test_v80_phase10_6_research_model.py'
+      - '.github/workflows/v80-phase10-6-research-model.yml'
+  pull_request:
+    branches:
+      - v8.0-phase10.6-research-model
+    paths:
+      - 'scripts/v80_phase10_6_research_model.py'
+      - 'tests/test_v80_phase10_6_research_model.py'
+      - '.github/workflows/v80-phase10-6-research-model.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run research model unit tests
+        run: python -m unittest discover -s tests -p 'test_v80_phase10_6_research_model.py' -v
+      - name: Compile research model
+        run: python -m py_compile scripts/v80_phase10_6_research_model.py
