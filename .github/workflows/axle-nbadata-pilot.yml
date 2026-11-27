@@ -2,7 +2,7 @@ name: AXLE NBA Data v2 audit
 on:
   pull_request:
     branches: [main]
-    paths: [.github/workflows/axle-nbadata-pilot.yml, axle_nbadata_match.py, axle_market_research.py]
+    paths: [.github/workflows/axle-nbadata-pilot.yml, axle_nbadata_match.py, axle_market_research.py, axle_snapshot_research.py]
 permissions:
   contents: read
 jobs:
@@ -61,6 +61,8 @@ jobs:
           print("Original rows",p.metadata.num_rows)
           print("Potential timestamp fields",[k for k in p.schema_arrow.names if any(t in k.lower() for t in ("time","date","snapshot","update","capture"))])
           PY
+      - name: Test snapshot and push settlement gates
+        run: python axle_snapshot_research.py
       - name: Reconcile historical games
         run: python axle_nbadata_match.py
       - uses: actions/upload-artifact@v4
