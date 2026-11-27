@@ -28,3 +28,8 @@ jobs:
       - run: python axle_quote_match.py
 
       - run: python axle_test_store.py
+
+      - run: pip install 'psycopg[binary]>=3.2,<4'
+      - run: python axle_neon_readiness.py
+        env:
+          AXLE_TEST_DATABASE_URL: ${{ secrets.AXLE_TEST_DATABASE_URL }}
