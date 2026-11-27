@@ -26,7 +26,9 @@ def capture(record, directory, now=None):
     if not math.isfinite(float(record["prediction"])): raise ValueError("prediction")
     if market!="moneyline" and not math.isfinite(float(record["line"])): raise ValueError("line")
     if "price" in record and record["price"] is not None:
-        if not math.isfinite(float(record["price"])) or abs(float(record["price"]))<100: raise ValueError("price")
+        price=float(record["price"])
+        fmt=record.get("price_format")
+        if not math.isfinite(price) or not ((fmt=="decimal" and price>1) or (fmt=="american" and abs(price)>=100)): raise ValueError("price")
     payload=dict(record,captured_at=now.isoformat(),source_independently_verified=False,research_only=True)
     raw=json.dumps(payload,sort_keys=True,allow_nan=False).encode()
     key=hashlib.sha256((record["game_id"]+"|"+market).encode()).hexdigest()
