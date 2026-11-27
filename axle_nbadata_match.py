@@ -1,6 +1,6 @@
 import csv, json, math, re, hashlib
 from collections import defaultdict, Counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 import pyarrow.parquet as pq
@@ -42,7 +42,8 @@ def main():
         y=int(r["season"][:4])+1
         candidates=idx[key(y,tip.astimezone(ZoneInfo("America/New_York")).date(),(h,hp),(a,ap))]
         if len(candidates)!=1:
-            issues.append((r["game_id"],"candidate_count",len(candidates))); continue
+            nearby=[(str(d),g["game_id"],g["game_type"],g["neutral_site"]) for offset in (-1,1) for d in [tip.astimezone(ZoneInfo("America/New_York")).date()+timedelta(days=offset)] for g,x,z in idx[key(y,d,(h,hp),(a,ap))]]
+            issues.append((r["game_id"],"candidate_count",len(candidates),nearby)); continue
         g,x,z=candidates[0]; gid=g["game_id"]
         if gid in used or (g["home_team_id"]!=h and g["neutral_site"] is not True):
             issues.append((r["game_id"],"orientation_or_duplicate")); continue
@@ -57,12 +58,12 @@ def main():
             ph,pa=poss(x),poss(z)
             minutes=float(x["min"])
             if minutes>100: minutes/=5
-            assert 48<=minutes<=78 and (minutes-48)%5<.01
+            assert 48<=minutes<=78 and abs((minutes-48)/5-round((minutes-48)/5))<.01, "duration"
             raw=[float(v[k]) for v in (x,z) for k in ("off_rating","def_rating","pace")]
             assert all(math.isfinite(n) and n>0 for n in raw)
             est=[100*hp/ph,100*ap/pa,48*(ph+pa)/(2*minutes),100*ap/pa,100*hp/ph,48*(ph+pa)/(2*minutes)]
-        except (ValueError,TypeError,AssertionError,KeyError):
-            issues.append((r["game_id"],"invalid_stats")); continue
+        except (ValueError,TypeError,AssertionError,KeyError) as exc:
+            issues.append((r["game_id"],"invalid_stats",str(exc),{k:x.get(k) for k in ("min","off_rating","def_rating","pace","fga","fta","oreb","tov")},{k:z.get(k) for k in ("min","off_rating","def_rating","pace","fga","fta","oreb","tov")})); continue
         used.add(gid)
         matched.append(dict(historical_id=r["game_id"],nba_id=gid,home=h,away=a,tip=tip.isoformat(),season=y,neutral=g["neutral_site"],game_type=g["game_type"],archive_values=raw,estimated_values=est,is_reconstructed=True))
     report=dict(matched=len(matched),unmatched=len(issues),issues=issues[:50],teams=len({v[k] for v in matched for k in ("home","away")}),types=Counter(v["game_type"] for v in matched),neutral=sum(v["neutral"] is True for v in matched),research_only=True,point_in_time_verified=False,cutoff=cutoff.isoformat(),sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [hist,*Path(".").glob("*.parquet")]})
