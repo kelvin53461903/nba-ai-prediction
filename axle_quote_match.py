@@ -21,7 +21,12 @@ def match(schedule,teams,payload,now):
         h,a=names.get(str(g["home_team_id"])),names.get(str(g["away_team_id"]))
         if not h or not a: counts["missing_team"]+=1; continue
         events=[e for e in payload["events"] if name(e["home_team"])==h and name(e["away_team"])==a and abs((utc(e["commence_time"])-tip).total_seconds())<=300]
-        if len(events)!=1: counts["unmatched_or_ambiguous"]+=1; continue
+        if len(events)!=1:
+            counts["unmatched_or_ambiguous"]+=1
+            pairs=[e for e in payload["events"] if name(e["home_team"])==h and name(e["away_team"])==a]
+            reverse=[e for e in payload["events"] if name(e["home_team"])==a and name(e["away_team"])==h]
+            print("MATCH_DIAGNOSTIC",json.dumps(dict(game_id=g["game_id"],home=h,away=a,tip=tip.isoformat(),pair_offsets_seconds=[(utc(e["commence_time"])-tip).total_seconds() for e in pairs],reverse_count=len(reverse),strict_candidates=len(events))))
+            continue
         counts["matched"]+=1
         markets=set()
         for b in events[0]["bookmakers"]:
@@ -29,6 +34,7 @@ def match(schedule,teams,payload,now):
             for m in b["markets"]:
                 k=m["key"]; outcomes=m["outcomes"]
                 if k not in ("h2h","spreads","totals") or len(outcomes)!=2: continue
+                if not m.get("last_update") or not now-timedelta(hours=12)<=utc(m["last_update"])<=retrieved: continue
                 if not all(isinstance(o["price"],(float,int)) and 1<o["price"]<1000 for o in outcomes): continue
                 if k in ("h2h","spreads") and {name(o["name"]) for o in outcomes}!={h,a}: continue
                 if k=="spreads" and abs(sum(o["point"] for o in outcomes))>1e-8: continue
