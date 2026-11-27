@@ -2,7 +2,7 @@ name: AXLE Elo historical validation
 on:
   push:
     branches: [v8.0-axle-hybrid-test]
-    paths: [axle_elo.py, .github/workflows/axle-elo-test.yml]
+    paths: [axle_elo.py, axle_advanced.py, axle_hybrid.py, .github/workflows/axle-elo-test.yml]
 permissions:
   contents: read
 jobs:
@@ -48,4 +48,9 @@ jobs:
           result = backtest(games,start)
           assert result['n']==1138
           print(json.dumps(result,indent=2))
+          from axle_advanced import evaluate as advanced, CONFIGS
+          from axle_hybrid import evaluate as hybrid
+          for name, cfg in CONFIGS.items():
+              print(name, json.dumps(advanced(games, *cfg)))
+          print('score MAE', json.dumps(hybrid(games)))
           PY
