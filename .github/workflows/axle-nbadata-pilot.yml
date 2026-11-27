@@ -2,7 +2,7 @@ name: AXLE NBA Data v2 audit
 on:
   pull_request:
     branches: [main]
-    paths: [.github/workflows/axle-nbadata-pilot.yml, axle_nbadata_match.py]
+    paths: [.github/workflows/axle-nbadata-pilot.yml, axle_nbadata_match.py, axle_market_research.py]
 permissions:
   contents: read
 jobs:
@@ -44,6 +44,12 @@ jobs:
               assert len(set(g["game_id"].to_pylist()))==g.num_rows
               assert len(set(zip(t["game_id"].to_pylist(),t["team_id"].to_pylist())))==t.num_rows
           PY
+      - name: Download historical market archives
+        run: |
+          for y in 2025 2026; do
+            curl -fL --max-time 60 "https://basketball-data.billmill.org/nba/espn/betting_lines/season=$y/data.parquet" -o "lines_$y.parquet"
+          done
+          sha256sum lines_*.parquet
       - name: Reconcile historical games
         run: python axle_nbadata_match.py
       - uses: actions/upload-artifact@v4
