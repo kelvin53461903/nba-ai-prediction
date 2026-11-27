@@ -19,6 +19,7 @@ def validate_prediction_rows(rows):
     errors = []
     if not isinstance(rows, list) or not rows: return ['rows must be a non-empty list']
     seen = set()
+    game_dates = {}
     for i, row in enumerate(rows):
         prefix = f'row {i}'
         if not isinstance(row, dict): errors.append(f'{prefix}: must be an object'); continue
@@ -26,8 +27,11 @@ def validate_prediction_rows(rows):
         missing = [k for k in required if k not in row or row[k] is None]
         errors.extend(f'{prefix}: missing {k}' for k in missing)
         if missing: continue
-        try: date.fromisoformat(str(row['game_date'])[:10])
-        except ValueError: errors.append(f'{prefix}: game_date must begin with ISO date')
+        try:
+            game_date = date.fromisoformat(str(row['game_date'])[:10]).isoformat()
+        except ValueError:
+            errors.append(f'{prefix}: game_date must begin with ISO date')
+            game_date = None
         if row['market'] not in MARKETS: errors.append(f'{prefix}: unsupported market')
         for key in ('model_probability','market_probability'):
             if _valid_probability(row[key]) is None: errors.append(f'{prefix}: {key} must be finite and strictly between 0 and 1')
@@ -35,14 +39,21 @@ def validate_prediction_rows(rows):
         identity = (str(row['game_id']),str(row['market']))
         if identity in seen: errors.append(f'{prefix}: duplicate game_id/market pair')
         seen.add(identity)
+        gid = str(row['game_id'])
+        if game_date is not None:
+            if gid in game_dates and game_dates[gid] != game_date:
+                errors.append(f'{prefix}: one game_id has inconsistent game_date values')
+            game_dates[gid] = game_date
         pred_ts, tip_ts = row.get('prediction_timestamp'), row.get('tipoff_timestamp')
         if bool(pred_ts) != bool(tip_ts): errors.append(f'{prefix}: provide both prediction_timestamp and tipoff_timestamp')
         elif pred_ts and tip_ts:
             try:
                 pred = datetime.fromisoformat(str(pred_ts).replace('Z','+00:00'))
                 tip = datetime.fromisoformat(str(tip_ts).replace('Z','+00:00'))
-                if pred.tzinfo is None or tip.tzinfo is None: errors.append(f'{prefix}: prediction and tipoff timestamps must include timezone')
-                elif pred >= tip: errors.append(f'{prefix}: prediction must be timestamped before tipoff')
+                if pred.tzinfo is None or tip.tzinfo is None:
+                    errors.append(f'{prefix}: prediction and tipoff timestamps must include timezone')
+                elif pred >= tip:
+                    errors.append(f'{prefix}: prediction must be timestamped before tipoff')
             except ValueError: errors.append(f'{prefix}: invalid prediction/tipoff timestamp')
     return errors
 
@@ -55,15 +66,21 @@ def _metrics(rows, probability_key):
     return {'n':n,'brier':brier,'log_loss':logloss}
 
 def chronological_holdout(rows, holdout_fraction=0.2):
+    """Split by whole ISO calendar dates so one slate can never straddle splits."""
     if not 0.05 <= holdout_fraction <= 0.5: raise ValueError('holdout_fraction must be between 0.05 and 0.5')
     errors = validate_prediction_rows(rows)
     if errors: raise ValueError('; '.join(errors))
-    ordered = sorted(rows,key=lambda r:(str(r['game_date']),str(r['game_id'])))
-    if len(ordered)<2: raise ValueError('at least two rows are required for chronological holdout')
-    split = max(1,min(len(ordered)-1,math.ceil(len(ordered)*(1-holdout_fraction))))
-    train, holdout = ordered[:split], ordered[split:]
-    if str(train[-1]['game_date']) > str(holdout[0]['game_date']): raise ValueError('chronological split boundary is invalid')
-    return train,holdout
+    dates = sorted({date.fromisoformat(str(r['game_date'])[:10]).isoformat() for r in rows})
+    if len(dates) < 2: raise ValueError('at least two distinct game dates are required')
+    split = max(1, min(len(dates)-1, math.ceil(len(dates)*(1-holdout_fraction))))
+    train_dates, holdout_dates = set(dates[:split]), set(dates[split:])
+    train = sorted([r for r in rows if str(r['game_date'])[:10] in train_dates],
+                   key=lambda r:(str(r['game_date']),str(r['game_id']),str(r['market'])))
+    holdout = sorted([r for r in rows if str(r['game_date'])[:10] in holdout_dates],
+                     key=lambda r:(str(r['game_date']),str(r['game_id']),str(r['market'])))
+    if not train or not holdout or max(train_dates) >= min(holdout_dates):
+        raise ValueError('chronological date-grouped split boundary is invalid')
+    return train, holdout
 
 def compare_model_to_market(rows, holdout_fraction=0.2):
     _,holdout = chronological_holdout(rows,holdout_fraction)
