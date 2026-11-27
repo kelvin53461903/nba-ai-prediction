@@ -9,22 +9,28 @@ def timestamp(x):
     if d.utcoffset() is None: raise ValueError("naive timestamp")
     return d
 
-def eligible(row,g,line):
+def rejection(row,g,line):
     try:
         snap=timestamp(row["snapshot"])
         start=timestamp(row["commence_time"])
         tip=timestamp(g["tip"])
-        return (snap<min(start,tip) and abs((start-tip).total_seconds())<=300
-            and row["spread_source"]=="odds_api_consensus_close"
-            and int(row["n_books"])>=1
-            and str(row["game_id"])==str(line["espn_event_id"])
-            and line["game_id"]==g["nba_id"]
-            and line["home_team_id"]==g["home"] and line["away_team_id"]==g["away"]
-            and all(math.isfinite(float(v)) for v in (row["home_point"],row["over_under"],line["close_spread"],line["close_total"]))
-            and abs(row["home_point"])<=40 and 150<=row["over_under"]<=300
-            and abs(row["home_point"]-line["close_spread"])<1e-8
-            and abs(row["over_under"]-line["close_total"])<1e-8)
-    except (TypeError,ValueError,KeyError,AttributeError): return False
+    except (TypeError,ValueError,KeyError,AttributeError): return "invalid_timestamp"
+    if snap>=min(start,tip): return "not_pregame"
+    if abs((start-tip).total_seconds())>300: return "tip_difference"
+    if row.get("spread_source")!="odds_api_consensus_close": return "source_label"
+    try:
+        if int(row["n_books"])<1: return "book_count"
+        if str(row["game_id"])!=str(line["espn_event_id"]) or line["game_id"]!=g["nba_id"]: return "id_mismatch"
+        if line["home_team_id"]!=g["home"] or line["away_team_id"]!=g["away"]: return "orientation"
+        if not all(math.isfinite(float(v)) for v in (row["home_point"],row["over_under"],line["close_spread"],line["close_total"])): return "nonfinite"
+        if abs(row["home_point"])>40 or not 150<=row["over_under"]<=300: return "line_range"
+        if abs(row["home_point"]-line["close_spread"])>=1e-8: return "spread_difference"
+        if abs(row["over_under"]-line["close_total"])>=1e-8: return "total_difference"
+    except (TypeError,ValueError,KeyError,AttributeError): return "invalid_fields"
+    return None
+
+def eligible(row,g,line):
+    return rejection(row,g,line) is None
 
 def grade(pred,actual):
     if pred==0: return "no_prediction"
@@ -46,7 +52,9 @@ def evaluate(games):
         rs=originals[str(ls[0]["espn_event_id"])] if len(ls)==1 else []
         ok=len(rs)==1 and eligible(rs[0],g,ls[0])
         if ok: verified+=1
-        else: rejected["missing_ambiguous_or_invalid_snapshot"]+=1
+        else:
+            reason="missing_or_duplicate_consensus" if len(ls)!=1 else "missing_or_duplicate_original" if len(rs)!=1 else rejection(rs[0],g,ls[0])
+            rejected[reason]+=1
         if ok and day.isoformat()>="2026-01-01":
             h,a=[[v for d,v in hist[g["season"],team] if d<=day-timedelta(days=2)] for team in (g["home"],g["away"])]
             if min(len(h),len(a))>=20:
