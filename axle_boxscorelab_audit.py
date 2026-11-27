@@ -21,8 +21,21 @@ def audit(path):
     counts={}
     if gid:
         for r in rows: counts[r[gid]]=counts.get(r[gid],0)+1
+    if not gid:
+        pairs={}
+        for r in rows:
+            t,o=r["team"],r["opponent"]
+            if t==o or t not in teams or o not in teams: raise ValueError("Invalid matchup")
+            pts,opp=int(r["points"]),int(r["opponent_points"])
+            if min(pts,opp)<=0 or pts==opp: raise ValueError("Invalid score")
+            k=(r["season"],r["game_date"],tuple(sorted(((t,pts),(o,opp)))))
+            pairs.setdefault(k,[]).append(r)
+        for k,v in pairs.items():
+            if len(v)!=2 or v[0]["team"]!=v[1]["opponent"] or v[1]["team"]!=v[0]["opponent"] or v[0]["home"]==v[1]["home"]:
+                raise ValueError("Unpaired or ambiguous game")
+        counts={k:len(v) for k,v in pairs.items()}
     stages=sorted({r[stage] for r in rows}) if stage else []
-    return dict(file=path.name,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw),columns=fields,rows=len(rows),team_column=team,teams=teams,game_id_column=gid,unique_games=len(counts) if gid else None,two_row_games=sum(v==2 for v in counts.values()) if gid else None,stage_column=stage,stage_values=stages,playoff_coverage="requires stage validation" if stage else "unverified",research_only=True)
+    return dict(file=path.name,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw),columns=fields,rows=len(rows),team_column=team,teams=teams,game_id_column=gid,unique_games=len(counts),two_row_games=sum(v==2 for v in counts.values()),match_key="game_id" if gid else "season/date/team/score pair",stage_column=stage,stage_values=stages,playoff_coverage="requires stage validation" if stage else "unverified",research_only=True)
 
 if __name__=="__main__":
     reports=[audit(Path(f"box_{year}.csv")) for year in (2025,2026)]
