@@ -1,0 +1,63 @@
+name: AXLE historical market audit
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/axle-market-audit.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyarrow
+      - name: Download public archives
+        run: |
+          for y in 2025 2026; do
+            curl -fL --max-time 60 "https://basketball-data.billmill.org/nba/espn/betting_lines/season=$y/data.parquet" -o "lines_$y.parquet"
+            curl -fL --max-time 60 "https://basketball-data.billmill.org/nba/stats/games/season=$y/data.parquet" -o "games_$y.parquet"
+          done
+          sha256sum *.parquet
+      - name: Audit market fields and coverage
+        run: |
+          python - <<'PY'
+          import pyarrow.parquet as pq
+          from collections import Counter
+          import json, math
+          from datetime import date
+          report=[]
+          for y in (2025,2026):
+              p=pq.ParquetFile(f"lines_{y}.parquet")
+              print(p.schema)
+              rows=p.read().to_pylist()
+              games={g["game_id"]:g for g in pq.read_table(f"games_{y}.parquet").to_pylist() if g["game_type"] in ("regular_season","playoffs","play_in","cup_final") and g["game_date"]<=date(2026,4,1)}
+              keys=[(r["game_id"],r["provider_id"]) for r in rows]
+              assert len(keys)==len(set(keys))
+              valid=[r for r in rows if r["game_id"] in games]
+              def price(x): return isinstance(x,(int,float)) and math.isfinite(x) and abs(x)>=100
+              def number(x,lo,hi): return isinstance(x,(int,float)) and math.isfinite(x) and lo<=x<=hi
+              markets={}
+              for phase in ("open","close"):
+                  for market,fields,check in [
+                      ("moneyline",["home_moneyline","away_moneyline"],lambda v:all(price(x) for x in v)),
+                      ("spread",["spread"],lambda v:number(v[0],-60,60)),
+                      ("total",["total"],lambda v:number(v[0],100,400)),
+                      ("spread_prices",["home_spread_odds","away_spread_odds"],lambda v:all(price(x) for x in v)),
+                      ("total_prices",["over_odds","under_odds"],lambda v:all(price(x) for x in v))]:
+                      good=[r for r in valid if check([r.get(phase+"_"+k) for k in fields])]
+                      markets[phase+"_"+market]={"games":len({r["game_id"] for r in good}),"providers":dict(Counter(r["provider_id"] for r in good))}
+              report.append(dict(season=y,eligible_archive_games=len(games),rows=len(valid),markets=markets,timestamp_columns=[k for k in p.schema_arrow.names if any(x in k.lower() for x in ("time","timestamp","captured","updated"))],point_in_time_verified=False,research_only=True,cutoff_basis="archive date only; exact UTC reconciliation pending"))
+          print(json.dumps(report,indent=2))
+          open("market_audit.json","w").write(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: market-audit
+          path: market_audit.json
+          if-no-files-found: warn
+          retention-days: 7
