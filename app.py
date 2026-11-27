@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import accuracy_score, mean_absolute_error, brier_score_loss
 
-if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V7.8 AUTO ODDS API', page_icon='🏀', layout='wide')
+if not os.environ.get('NBA_WORKER'): st.set_page_config(page_title='NBA AI V8.0 Beta', page_icon='🏀', layout='wide')
 HK=ZoneInfo('Asia/Hong_Kong')
 BASE='https://api.balldontlie.io/v1/'
 NBA_LOGO_IDS = {'ATL': 1610612737, 'BOS': 1610612738, 'BKN': 1610612751, 'CHA': 1610612766, 'CHI': 1610612741, 'CLE': 1610612739, 'DAL': 1610612742, 'DEN': 1610612743, 'DET': 1610612765, 'GSW': 1610612744, 'HOU': 1610612745, 'IND': 1610612754, 'LAC': 1610612746, 'LAL': 1610612747, 'MEM': 1610612763, 'MIA': 1610612748, 'MIL': 1610612749, 'MIN': 1610612750, 'NOP': 1610612740, 'NYK': 1610612752, 'OKC': 1610612760, 'ORL': 1610612753, 'PHI': 1610612755, 'PHX': 1610612756, 'POR': 1610612757, 'SAC': 1610612758, 'SAS': 1610612759, 'TOR': 1610612761, 'UTA': 1610612762, 'WAS': 1610612764}
@@ -122,6 +122,9 @@ def simulate(hp,ap,residuals,seed):
     return draws
 
 def cloud_config():
+    return None  # Beta: never connect to production storage
+
+def _disabled_production_cloud_config():
     try:
         url=os.environ.get('SUPABASE_URL') or st.secrets['SUPABASE_URL']
         key=os.environ.get('SUPABASE_SERVICE_KEY') or st.secrets['SUPABASE_SERVICE_KEY']
@@ -137,6 +140,9 @@ def cloud_request(method, **kwargs):
     return r
 
 def ledger(game, ts, p, hp, ap):
+    return  # Beta: no persistent prediction writes
+
+def _disabled_ledger(game, ts, p, hp, ap):
     captured=datetime.now(HK)
     if captured>=ts or final(game) or game.get('postponed'): return
     row=dict(id=int(game['id']),tip=ts.isoformat(),captured=captured.isoformat(),home=name(game['home_team']),away=name(game['visitor_team']),probability=float(p),hp=float(hp),ap=float(ap))
@@ -312,12 +318,12 @@ def background_job():
     print('Scheduled run completed; cloud ledger checked.')
 
 if os.environ.get('NBA_WORKER'):
-    background_job()
-    raise SystemExit(0)
+    raise SystemExit('Beta worker disabled')
 
 # Use Streamlit native theme rather than conflicting global CSS.
 
-st.title('NBA AI Prediction Platform')
+st.title('NBA AI Prediction Platform V8.0 Beta')
+st.warning('獨立測試版：沿用原有模型；AXLE 新模型尚未完成正式驗收。永久儲存及正式資料庫接駁停用。')
 st.caption('香港時間｜GitHub Actions 共用歷史資料｜每日賽事預測｜傷兵風險')
 def configured_key():
     for field in ('BDL_API_KEY','BALLDONTLIE_API_KEY'):
@@ -353,9 +359,9 @@ def render_ledger(now):
 def dashboard():
     now=datetime.now(HK); today=now.date(); season=today.year if today.month>=9 else today.year-1
     labels=['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','公開賠率 API 比較']
-    page=st.radio('功能選擇',labels,index=5,horizontal=True,label_visibility='collapsed')
+    page=st.radio('功能選擇',labels,index=0,horizontal=True,label_visibility='collapsed')
     if page==labels[5]:
-        render_ledger(now); return
+        st.info('Beta 預測紀錄及永久儲存暫停。'); return
     if not key: st.info('請設定 BALLDONTLIE API Key。'); return
     day=st.date_input('比賽日期（香港時間）',today)
     games=[]; updated=''
