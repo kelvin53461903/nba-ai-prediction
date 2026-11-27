@@ -28,6 +28,10 @@ def main():
             gid=g["game_id"]
             assert re.fullmatch(r"\d{10}",gid)
             h,a=g["home_team_id"],g["away_team_id"]
+            if g["neutral_site"] is True:
+                teams=sorted(k[1] for k in t if k[0]==gid)
+                if len(teams)!=2: continue
+                h,a=teams
             x,z=t.get((gid,h)),t.get((gid,a))
             if x is None or z is None: continue
             if x["opp_team_id"]!=a or z["opp_team_id"]!=h: continue
