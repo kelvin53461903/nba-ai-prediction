@@ -78,6 +78,10 @@ def main():
     # No raw archive rows uploaded; only aggregate audit.
     Path("nbadata_match_audit.json").write_text(json.dumps(report,indent=2))
     print(json.dumps(report,indent=2))
+    if len(matched)==2459 and report["teams"]==30:
+        from axle_market_research import audit_market
+        if Path("lines_2025.parquet").exists():
+            report["market"]=audit_market(matched)
     from axle_rolling import evaluate
     report["rolling_research"]=evaluate(matched)
     Path("nbadata_match_audit.json").write_text(json.dumps(report,indent=2))
