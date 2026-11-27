@@ -36,6 +36,7 @@ def show_team_logo(column, team):
         st.caption(display_team(team))
 
 from api_cache import fetch_cached, RateLimited
+from v80_market_integration import render_v80_market_status
 
 def fetch(key, endpoint, pairs):
     return fetch_cached(key, BASE, endpoint, pairs, worker=bool(os.environ.get('NBA_WORKER')))
@@ -352,10 +353,12 @@ def render_ledger(now):
 @st.fragment(run_every=600 if auto else None)
 def dashboard():
     now=datetime.now(HK); today=now.date(); season=today.year if today.month>=9 else today.year-1
-    labels=['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','公開賠率 API 比較']
+    labels=['每日賽程與預測','傷兵中心','球員搜尋','模型評估','Elo 排名','預測紀錄','公開賠率 API 比較','V8.0 三市場整合']
     page=st.radio('功能選擇',labels,index=5,horizontal=True,label_visibility='collapsed')
     if page==labels[5]:
         render_ledger(now); return
+    if page==labels[7]:
+        render_v80_market_status(st); return
     if not key: st.info('請設定 BALLDONTLIE API Key。'); return
     day=st.date_input('比賽日期（香港時間）',today)
     games=[]; updated=''
