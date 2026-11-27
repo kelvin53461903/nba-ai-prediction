@@ -1,0 +1,30 @@
+name: NBA V8.0 Phase 10.1 Pregame Feature Tests
+on:
+  push:
+    branches:
+      - v8.0-phase10.1-pregame-feature-dataset
+    paths:
+      - 'scripts/v80_pregame_feature_dataset.py'
+      - 'tests/test_v80_pregame_feature_dataset.py'
+      - '.github/workflows/v80-phase10-1-pregame-tests.yml'
+  pull_request:
+    branches:
+      - v8.0-phase10.1-pregame-feature-dataset
+    paths:
+      - 'scripts/v80_pregame_feature_dataset.py'
+      - 'tests/test_v80_pregame_feature_dataset.py'
+      - '.github/workflows/v80-phase10-1-pregame-tests.yml'
+permissions:
+  contents: read
+jobs:
+  pregame-feature-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run pregame feature chronology tests
+        run: python -m unittest discover -s tests -p 'test_v80_pregame_feature_dataset.py' -v
+      - name: Compile feature builder
+        run: python -m py_compile scripts/v80_pregame_feature_dataset.py
