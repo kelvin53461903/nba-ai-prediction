@@ -86,5 +86,6 @@ def main():
     report["rolling_research"]=evaluate(matched)
     Path("nbadata_match_audit.json").write_text(json.dumps(report,indent=2))
     print(json.dumps(report["rolling_research"]))
+    if "market" in report: print("EXACT_MARKET",json.dumps(report["market"]),flush=True)
     if len(matched)!=2459 or report["teams"]!=30: raise ValueError("Incomplete reconciliation")
 if __name__=="__main__": main()
