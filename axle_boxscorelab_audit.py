@@ -1,0 +1,47 @@
+import csv, hashlib, json, re
+from pathlib import Path
+
+def audit(path):
+    raw=path.read_bytes()
+    with path.open(encoding="utf-8-sig",newline="") as f:
+        reader=csv.DictReader(f)
+        fields=reader.fieldnames or []
+        rows=list(reader)
+    if not rows or len(set(fields))!=len(fields):
+        raise ValueError("Empty or ambiguous CSV")
+    if any(None in r or any(v is None for v in r.values()) for r in rows):
+        raise ValueError("Malformed CSV")
+    aliases={re.sub(r"[^a-z0-9]","",k.lower()):k for k in fields}
+    def pick(*names):
+        return next((aliases[n] for n in names if n in aliases),None)
+    team=pick("team","teamid","teamname","teamabbreviation","teamabbr","teamtricode")
+    gid=pick("gameid","game")
+    stage=pick("seasontype","gametype","stage","seasonphase","playoffs","isplayoff")
+    teams=sorted({r[team] for r in rows}) if team else []
+    counts={}
+    if gid:
+        for r in rows: counts[r[gid]]=counts.get(r[gid],0)+1
+    if not gid:
+        pairs={}
+        for r in rows:
+            t,o=r["team"],r["opponent"]
+            if t==o or t not in teams or o not in teams: raise ValueError("Invalid matchup")
+            pts,opp=int(r["points"]),int(r["opponent_points"])
+            if min(pts,opp)<=0 or pts==opp: raise ValueError("Invalid score")
+            k=(r["season"],r["game_date"],tuple(sorted(((t,pts),(o,opp)))))
+            pairs.setdefault(k,[]).append(r)
+        bad=[]
+        for k,v in pairs.items():
+            if len(v)!=2 or v[0]["team"]!=v[1]["opponent"] or v[1]["team"]!=v[0]["opponent"] or v[0]["home"]==v[1]["home"]:
+                bad.append((k,[{x:r[x] for x in ("team","opponent","home","game_date","points","opponent_points")} for r in v]))
+        print("Pair anomalies:",len(bad),json.dumps(bad[:30]),flush=True)
+        counts={k:len(v) for k,v in pairs.items()}
+    stages=sorted({r[stage] for r in rows}) if stage else []
+    return dict(file=path.name,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw),columns=fields,rows=len(rows),team_column=team,teams=teams,game_id_column=gid,unique_games=len(counts),two_row_games=sum(v==2 for v in counts.values()),pair_anomalies=len(bad) if not gid else None,match_key="game_id" if gid else "season/date/team/score pair",stage_column=stage,stage_values=stages,playoff_coverage="requires stage validation" if stage else "unverified",research_only=True)
+
+if __name__=="__main__":
+    reports=[audit(Path(f"box_{year}.csv")) for year in (2025,2026)]
+    Path("boxscorelab_audit.json").write_text(json.dumps(reports,indent=2))
+    print(json.dumps(reports,indent=2))
+    if any(r["pair_anomalies"] or len(r["teams"])!=30 or r["unique_games"] is None or r["two_row_games"]!=r["unique_games"] for r in reports):
+        raise ValueError("Team or game coverage not verified")

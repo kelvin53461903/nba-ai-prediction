@@ -1,0 +1,50 @@
+name: AXLE archive research pilot
+on:
+  pull_request:
+    branches: [main]
+    paths: [axle_archive.py, .github/workflows/axle-archive-pilot.yml]
+permissions:
+  contents: read
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: v8.0-calibration-test
+          path: historical-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas pyarrow
+      - name: Download temporary research inputs
+        run: |
+          curl -fL --max-time 90 https://raw.githubusercontent.com/sportsdataverse/hoopR-nba-stats-data/main/nba_stats/nba_stats_schedule_master.parquet -o schedule.parquet
+          curl -fL --max-time 60 https://api.github.com/repos/sportsdataverse/sportsdataverse-data/releases/tags/nba_stats_team_boxscores -o release.json
+          python - <<'PY'
+          import json, subprocess
+          assets=json.load(open("release.json"))["assets"]
+          print("Published assets:", [a["name"] for a in assets])
+          for year in (2025,2026):
+              matches=[a for a in assets if a["name"] in (f"team_boxscores_{year}.parquet",f"nba_team_boxscores_{year}.parquet",f"nba_stats_team_boxscores_{year}.parquet")]
+              if len(matches)!=1: raise ValueError(f"Unresolved asset for {year}")
+              url=matches[0]["browser_download_url"]
+              print(url,flush=True)
+              subprocess.run(["curl","-fL","--max-time","90",url,"-o",f"box_{year}.parquet"],check=True)
+          PY
+      - name: Reconcile archive
+        run: |
+          python -m py_compile axle_archive.py
+          python axle_archive.py historical-source/data/nba_v80_historical_games_cutoff_2026-04-01.csv schedule.parquet box_2025.parquet box_2026.parquet
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-audit-counts
+          path: archive_audit.json
+          if-no-files-found: warn
+          retention-days: 7

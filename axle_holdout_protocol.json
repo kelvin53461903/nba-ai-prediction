@@ -1,0 +1,22 @@
+{
+  "status": "protocol_only_not_executed",
+  "start_utc": "2026-11-29T00:00:00Z",
+  "end_utc_exclusive": "2027-04-01T00:00:00Z",
+  "models": {
+    "spread": "Rolling 10",
+    "total": "Rolling 20",
+    "moneyline": "Elo"
+  },
+  "embargo_days": 2,
+  "min_settled_per_market": 300,
+  "requirements": [
+    "immutable pregame prediction and quote records",
+    "verified quote timestamp before tip",
+    "verified feature availability before prediction",
+    "actual price required for ROI",
+    "no tuning on holdout",
+    "data usage permission"
+  ],
+  "release": "blocked_until_verified",
+  "historical_research_is_not_holdout": true
+}
