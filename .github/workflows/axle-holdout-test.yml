@@ -20,3 +20,5 @@ jobs:
 
       - run: python axle_holdout_settle.py
       - run: python axle_holdout_ingest.py
+
+      - run: python axle_live_results.py
