@@ -50,6 +50,17 @@ jobs:
             curl -fL --max-time 60 "https://basketball-data.billmill.org/nba/espn/betting_lines/season=$y/data.parquet" -o "lines_$y.parquet"
           done
           sha256sum lines_*.parquet
+      - name: Inspect pinned original consensus archive
+        run: |
+          curl -fL --max-time 60 https://raw.githubusercontent.com/sportsdataverse/hoopR-nba-data/7be25dae2ebe5f6027f5343a4ab3195caa61aee5/nba/betting_lines/closing_lines_odds_api.parquet -o original_consensus.parquet
+          sha256sum original_consensus.parquet
+          python - <<'PY'
+          import pyarrow.parquet as pq
+          p=pq.ParquetFile("original_consensus.parquet")
+          print(p.schema)
+          print("Original rows",p.metadata.num_rows)
+          print("Potential timestamp fields",[k for k in p.schema_arrow.names if any(t in k.lower() for t in ("time","date","snapshot","update","capture"))])
+          PY
       - name: Reconcile historical games
         run: python axle_nbadata_match.py
       - uses: actions/upload-artifact@v4
