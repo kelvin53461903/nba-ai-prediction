@@ -1,0 +1,51 @@
+name: AXLE Elo historical validation
+on:
+  push:
+    branches: [v8.0-axle-hybrid-test]
+    paths: [axle_elo.py, .github/workflows/axle-elo-test.yml]
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: v8.0-calibration-test
+          path: historical-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python axle_elo.py
+      - name: Validate and backtest historical CSV
+        run: |
+          python - <<'PY'
+          import csv, json
+          from collections import Counter
+          from datetime import datetime, timezone
+          from axle_elo import backtest
+          from pathlib import Path
+          import subprocess
+          path = 'data/nba_v80_historical_games_cutoff_2026-04-01.csv'
+          blob = subprocess.check_output(['git','-C','historical-source','hash-object',path],text=True).strip()
+          assert blob == '2bc12aa7a1cece60c55ee8f7a929233d4d1c8d0b'
+          with (Path('historical-source') / path).open(encoding='utf-8-sig') as f:
+              rows = list(csv.DictReader(f))
+          assert len(rows) == len({r['game_id'] for r in rows}) == 2459
+          assert Counter(r['season'] for r in rows) == {'2024-25':1321,'2025-26':1138}
+          games = []
+          for r in rows:
+              dt = datetime.fromisoformat(r['commence_time_utc']).astimezone(timezone.utc)
+              assert dt < datetime(2026,4,2,tzinfo=timezone.utc)
+              assert r['game_status'] == 'Final'
+              games.append(dict(date=dt.date().isoformat(),season=r['season'],id=r['game_id'],home=r['home_team_id'],away=r['away_team_id'],hp=int(r['home_score']),ap=int(r['away_score'])))
+          start = min(g['date'] for g in games if g['season']=='2025-26')
+          result = backtest(games,start)
+          assert result['n']==1138
+          print(json.dumps(result,indent=2))
+          PY
