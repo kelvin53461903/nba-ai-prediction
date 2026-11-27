@@ -58,17 +58,25 @@ def main():
             ph,pa=poss(x),poss(z)
             minutes=float(x["min"])
             if minutes>100: minutes/=5
-            assert 48<=minutes<=78 and abs((minutes-48)/5-round((minutes-48)/5))<.01, "duration"
+            other=float(z["min"])
+            if other>100: other/=5
+            duration=48+5*round((minutes-48)/5)
+            assert 48<=duration<=78 and abs(minutes-duration)<=0.5 and abs(other-duration)<=0.5 and abs(minutes-other)<=0.1, "duration"
+            minutes=duration
             raw=[float(v[k]) for v in (x,z) for k in ("off_rating","def_rating","pace")]
             assert all(math.isfinite(n) and n>0 for n in raw)
             est=[100*hp/ph,100*ap/pa,48*(ph+pa)/(2*minutes),100*ap/pa,100*hp/ph,48*(ph+pa)/(2*minutes)]
         except (ValueError,TypeError,AssertionError,KeyError) as exc:
             issues.append((r["game_id"],"invalid_stats",str(exc),{k:x.get(k) for k in ("min","off_rating","def_rating","pace","fga","fta","oreb","tov")},{k:z.get(k) for k in ("min","off_rating","def_rating","pace","fga","fta","oreb","tov")})); continue
         used.add(gid)
-        matched.append(dict(historical_id=r["game_id"],nba_id=gid,home=h,away=a,tip=tip.isoformat(),season=y,neutral=g["neutral_site"],game_type=g["game_type"],archive_values=raw,estimated_values=est,is_reconstructed=True))
+        matched.append(dict(historical_id=r["game_id"],nba_id=gid,home=h,away=a,tip=tip.isoformat(),season=y,hp=hp,ap=ap,neutral=g["neutral_site"],game_type=g["game_type"],archive_values=raw,estimated_values=est,is_reconstructed=True))
     report=dict(matched=len(matched),unmatched=len(issues),issues=issues[:50],teams=len({v[k] for v in matched for k in ("home","away")}),types=Counter(v["game_type"] for v in matched),neutral=sum(v["neutral"] is True for v in matched),research_only=True,point_in_time_verified=False,cutoff=cutoff.isoformat(),sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [hist,*Path(".").glob("*.parquet")]})
     # No raw archive rows uploaded; only aggregate audit.
     Path("nbadata_match_audit.json").write_text(json.dumps(report,indent=2))
     print(json.dumps(report,indent=2))
+    from axle_rolling import evaluate
+    report["rolling_research"]=evaluate(matched)
+    Path("nbadata_match_audit.json").write_text(json.dumps(report,indent=2))
+    print(json.dumps(report["rolling_research"]))
     if len(matched)!=2459 or report["teams"]!=30: raise ValueError("Incomplete reconciliation")
 if __name__=="__main__": main()
