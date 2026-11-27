@@ -82,6 +82,10 @@ def main():
         from axle_market_research import audit_market
         if Path("lines_2025.parquet").exists():
             report["market"]=audit_market(matched)
+    if len(matched)==2459 and Path("original_consensus.parquet").exists():
+        from axle_snapshot_research import evaluate as snapshot_evaluate
+        report["snapshot_research"]=snapshot_evaluate(matched)
+        print("SNAPSHOT_RESEARCH",json.dumps(report["snapshot_research"]),flush=True)
     from axle_rolling import evaluate
     report["rolling_research"]=evaluate(matched)
     Path("nbadata_match_audit.json").write_text(json.dumps(report,indent=2))
