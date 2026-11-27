@@ -1,0 +1,46 @@
+name: AXLE CDN parallel pilot
+on:
+  pull_request:
+    branches: [main]
+    paths: [axle_cdn.py, .github/workflows/axle-cdn-pilot.yml]
+  push:
+    branches: [v8.0-axle-hybrid-test]
+    paths: [axle_cdn.py, .github/workflows/axle-cdn-pilot.yml]
+permissions:
+  contents: read
+jobs:
+  cdn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: v8.0-calibration-test
+          path: historical-source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline validation
+        run: |
+          python -m py_compile axle_cdn.py
+          python - <<'PY'
+          from axle_cdn import possessions, utc
+          from axle_hybrid import advanced_score
+          t={"statistics":dict(fieldGoalsAttempted=90,freeThrowsAttempted=20,reboundsOffensive=10,turnoversTotal=12)}
+          assert abs(possessions(t)-100.8)<1e-9
+          t["statistics"]["turnoversTotal"]=-1
+          try: possessions(t)
+          except ValueError: pass
+          else: raise AssertionError("Invalid count accepted")
+          try: advanced_score(dict(source="NBA.com",is_reconstructed=True),{},utc("2026-01-01T00:00:00Z"))
+          except ValueError: pass
+          else: raise AssertionError("Reconstruction admitted")
+          PY
+      - name: Live CDN pilot
+        run: python axle_cdn.py historical-source/data/nba_v80_historical_games_cutoff_2026-04-01.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: axle-cdn-pilot
+          path: cdn_pilot.json
+          if-no-files-found: error
