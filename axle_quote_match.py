@@ -20,13 +20,17 @@ def match(schedule,teams,payload,now):
         if g["status"]!="scheduled" or not tip or not now<tip<=now+timedelta(hours=24): continue
         h,a=names.get(str(g["home_team_id"])),names.get(str(g["away_team_id"]))
         if not h or not a: counts["missing_team"]+=1; continue
-        events=[e for e in payload["events"] if name(e["home_team"])==h and name(e["away_team"])==a and abs((utc(e["commence_time"])-tip).total_seconds())<=300]
+        events=[e for e in payload["events"] if name(e["home_team"])==h and name(e["away_team"])==a and abs((utc(e["commence_time"])-tip).total_seconds())<=600]
+        if len(events)==1 and abs((utc(events[0]["commence_time"])-tip).total_seconds())>300:
+            counts["research_identity_candidate_only"]+=1
+            continue
         if len(events)!=1:
             counts["unmatched_or_ambiguous"]+=1
             pairs=[e for e in payload["events"] if name(e["home_team"])==h and name(e["away_team"])==a]
             reverse=[e for e in payload["events"] if name(e["home_team"])==a and name(e["away_team"])==h]
             print("MATCH_DIAGNOSTIC",json.dumps(dict(game_id=g["game_id"],home=h,away=a,tip=tip.isoformat(),pair_offsets_seconds=[(utc(e["commence_time"])-tip).total_seconds() for e in pairs],reverse_count=len(reverse),strict_candidates=len(events))))
             continue
+        if not now<min(tip,utc(events[0]["commence_time"])): continue
         counts["matched"]+=1
         markets=set()
         for b in events[0]["bookmakers"]:
